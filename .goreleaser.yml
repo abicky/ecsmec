@@ -1,21 +1,37 @@
-# This is an example goreleaser.yaml file with some sane defaults.
-# Make sure to check the documentation at http://goreleaser.com
 before:
   hooks:
-    # You may remove this if you don't use go modules.
     - go mod download
-    # you may remove this if you don't need go generate
-    - go generate ./...
+    - env GO111MODULE=off GOBIN=/tmp/bin go get github.com/Songmu/gocredits/cmd/gocredits
+    - /tmp/bin/gocredits -w .
 builds:
-- env:
-  - CGO_ENABLED=0
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    ldflags:
+      - -s -w -X github.com/abicky/ecsmec/cmd.revision={{.ShortCommit}}
 archives:
-- replacements:
-    darwin: Darwin
-    linux: Linux
-    windows: Windows
-    386: i386
-    amd64: x86_64
+  - # Exclude the version to download the latest version via https://github.com/abicky/ecsmec/releases/latest/download/$archive_name
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    files:
+      - LICENSE
+      - README.md
+      - CREDITS
+    format_overrides:
+      - goos: windows
+        format: zip
+    wrap_in_directory: true
+brews:
+  - tap:
+      owner: abicky
+      name: homebrew-tools
+    homepage: "https://github.com/abicky/ecsmec"
+    description: "A CLI tool for Amazon ECS that provides some commands to execute bothersome operations"
+    folder: Formula
+    test: |
+      system "#{bin}/ecsmec --version"
 checksum:
   name_template: 'checksums.txt'
 snapshot:
@@ -24,5 +40,5 @@ changelog:
   sort: asc
   filters:
     exclude:
-    - '^docs:'
-    - '^test:'
+      - '^docs:'
+      - '^test:'

@@ -12,7 +12,7 @@ clean:
 
 .PHONY: install
 install:
-	go install
+	go install -ldflags "-s -w -X github.com/abicky/ecsmec/cmd.revision=$(shell git rev-parse --short HEAD)"
 
 .PHONY: test
 test:

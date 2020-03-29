@@ -1,4 +1,4 @@
-name: test
+name: main
 on:
   push:
   pull_request:
@@ -32,3 +32,25 @@ jobs:
       - run: go fmt ./... && git diff --exit-code -- ':!go.sum'
 
       - run: make test
+
+  release:
+    runs-on: ubuntu-latest
+    needs: test
+    if: contains(github.ref, 'tags/v')
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Check the version
+        run: grep -qr "version = \"$(git tag --points-at HEAD | sed 's/^v//')\"" cmd
+
+      - run: git fetch --prune --unshallow
+      - uses: actions/setup-go@v1
+        with:
+          go-version: 1.15
+      - uses: goreleaser/goreleaser-action@v1
+        with:
+          version: latest
+          args: release --rm-dist
+        env:
+          # Use a custom token instead of GITHUB_TOKEN for the homebrew tap
+          GITHUB_TOKEN: ${{ secrets.GORELEASER_GITHUB_TOKEN }}

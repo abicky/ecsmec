@@ -9,13 +9,18 @@ import (
 	"golang.org/x/xerrors"
 )
 
+const version = "0.1.0"
+
+// This variable should be overwritten by -ldflags
+var revision = "HEAD"
+
 var rootCmd = &cobra.Command{
 	Use:           "ecsmec",
 	Short:         "A CLI tool for Amazon ECS that provides some commands to execute bothersome operations",
 	Long:          "A CLI tool for Amazon ECS that provides some commands to execute bothersome operations",
 	SilenceErrors: true,
 	SilenceUsage:  true,
-	Version:       "0.1.0",
+	Version:       version,
 }
 
 type runtimeError struct {
@@ -50,6 +55,9 @@ func Execute() int {
 }
 
 func init() {
+	rootCmd.SetVersionTemplate(fmt.Sprintf(
+		`{{with .Name}}{{printf "%%s " .}}{{end}}{{printf "version %%s" .Version}} (revision %s)
+`, revision))
 	rootCmd.PersistentFlags().String("profile", "", "An AWS profile name in your credential file")
 	rootCmd.PersistentFlags().String("region", "", "The AWS region")
 }
