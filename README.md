@@ -6,6 +6,48 @@
 For example, if you manage your ECS clusters with a auto scaling group and want to replace all the container instances with new ones, you have to launch new instances, drain old instances, and so on. What a pain!
 This tool enables you to do such operations easily.
 
+## Installation
+
+### Install pre-compiled binary
+
+Download the binary archive from the [releases page](https://github.com/abicky/ecsmec/releases), unpack it, and move the executable "ecsmec" to a directory in your path (e.g. `/usr/local/bin`).
+
+For example, you can install the latest binary on macOS by the following commands:
+
+```
+curl -LO https://github.com/abicky/ecsmec/releases/latest/download/ecsmec_darwin_amd64.tar.gz
+tar xvf ecsmec_darwin_amd64.tar.gz
+mv ecsmec_darwin_amd64/ecsmec /usr/local/bin/
+```
+
+If you download the archive via a browser on macOS Catalina or later, you may receive the message "“ecsmec” cannot be opened because the developer cannot be verified."
+In such a case, you need to delete the attribute "com.apple.quarantine" like below:
+
+```
+xattr -d com.apple.quarantine /path/to/ecsmec
+```
+
+### Install with Homebrew (macOS or Linux)
+
+```
+brew install abicky/tools/ecsmec
+```
+
+### Install from source
+
+```
+go get -u github.com:abicky/ecsmec
+```
+
+or
+
+```
+git clone https://github.com:abicky/ecsmec
+cd ecsmec
+make install
+```
+
+
 ## Usage
 
 ### replace-auto-scaling-group-instances
