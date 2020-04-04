@@ -150,6 +150,91 @@ You need the following permissions to execute the command:
 }
 ```
 
+### terminate-spot-fleet-request-instances
+
+```
+$ ecsmec terminate-spot-fleet-instances --help
+This command terminates all the container instances safely that belong
+to the specified spot fleet request.
+
+Usage:
+  ecsmec terminate-spot-fleet-instances [flags]
+
+Flags:
+      --batch-size int                  The number of instances drained at a once (default 100)
+      --cluster CLUSTER                 The name of the target CLUSTER (default "default")
+  -h, --help                            help for terminate-spot-fleet-instances
+      --spot-fleet-request-id REQUEST   The ID of the target REQUEST (required)
+
+Global Flags:
+      --profile string   An AWS profile name in your credential file
+      --region string    The AWS region
+```
+
+This command does the following operations to terminate container instances:
+
+1. Drain container instances and stop tasks that are running on the instances and don't belong to a service
+    - See the [AWS document](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/container-instance-draining.html) for more details on container instance draining
+1. Terminate the instances
+
+You need the following permissions to execute the command:
+
+```
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeSpotFleetInstances",
+        "ec2:DescribeSpotFleetRequests",
+        "ec2:TerminateInstances"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ListContainerInstances"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account-id>:cluster/<cluster>"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeContainerInstances",
+        "ecs:ListTasks",
+        "ecs:UpdateContainerInstancesState"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account-id>:container-instance/<cluster>/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeTasks",
+        "ecs:StopTask"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account-id>:task/<cluster>/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeServices"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account-id>:service/<cluster>/*"
+      ]
+    }
+  ]
+}
+```
 
 ## Author
 
