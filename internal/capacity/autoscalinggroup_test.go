@@ -11,6 +11,7 @@ import (
 	"github.com/golang/mock/gomock"
 
 	"github.com/abicky/ecsmec/internal/capacity"
+	"github.com/abicky/ecsmec/internal/const/autoscalingconst"
 	"github.com/abicky/ecsmec/internal/sliceutil"
 	"github.com/abicky/ecsmec/internal/testing/mocks"
 )
@@ -669,4 +670,100 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
+}
+
+func TestAutoScalingGroup_ReduceCapacity(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	asMock := mocks.NewMockAutoScalingAPI(ctrl)
+	ec2Mock := mocks.NewMockEC2API(ctrl)
+	drainerMock := mocks.NewMockDrainer(ctrl)
+
+	now := time.Now().UTC()
+
+	instancesToTerminate := append(
+		append(
+			createInstances("ap-northeast-1a", autoscalingconst.MaxDetachableInstances),
+			createInstances("ap-northeast-1c", autoscalingconst.MaxDetachableInstances+1)...,
+		),
+		createInstances("ap-northeast-1d", autoscalingconst.MaxDetachableInstances)...,
+	)
+	reservationsToTerminate := createReservations(instancesToTerminate, now.Add(-24*time.Hour))
+
+	instancesToKeep := append(
+		append(
+			createInstances("ap-northeast-1a", 2),
+			createInstances("ap-northeast-1c", 2)...,
+		),
+		createInstances("ap-northeast-1d", 2)...,
+	)
+	reservationsToKeep := createReservations(instancesToKeep, now)
+
+	allInstances := append(instancesToTerminate, instancesToKeep...)
+	detachedInstanceIds := make([]string, 0, len(instancesToTerminate))
+	terminatedInstanceIds := make([]string, 0, len(instancesToTerminate))
+
+	gomock.InOrder(
+		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+			AutoScalingGroups: []*autoscaling.Group{
+				{
+					AutoScalingGroupName: aws.String("autoscaling-group-name"),
+					DesiredCapacity:      aws.Int64(int64(len(allInstances))),
+					Instances:            allInstances,
+					MaxSize:              aws.Int64(int64(len(allInstances))),
+				},
+			},
+		}, nil),
+
+		ec2Mock.EXPECT().DescribeInstances(gomock.Any()).Return(&ec2.DescribeInstancesOutput{
+			Reservations: append(reservationsToTerminate, reservationsToKeep...),
+		}, nil),
+
+		drainerMock.EXPECT().Drain(gomock.Len(len(instancesToTerminate))),
+
+		asMock.EXPECT().DetachInstances(gomock.Any()).Times(4).Do(func(input *autoscaling.DetachInstancesInput) {
+			detachedInstanceIds = append(detachedInstanceIds, aws.StringValueSlice(input.InstanceIds)...)
+		}),
+
+		ec2Mock.EXPECT().TerminateInstances(gomock.Any()).Do(func(input *ec2.TerminateInstancesInput) {
+			terminatedInstanceIds = append(terminatedInstanceIds, aws.StringValueSlice(input.InstanceIds)...)
+		}),
+
+		ec2Mock.EXPECT().WaitUntilInstanceTerminated(gomock.Any()),
+
+		// Call `reload` at the end of the method
+		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+			AutoScalingGroups: []*autoscaling.Group{
+				{
+					AutoScalingGroupName: aws.String("autoscaling-group-name"),
+					DesiredCapacity:      aws.Int64(int64(len(instancesToKeep))),
+					Instances:            instancesToKeep,
+					MaxSize:              aws.Int64(int64(len(allInstances))),
+				},
+			},
+		}, nil),
+	)
+
+	group, err := capacity.NewAutoScalingGroup("autoscaling-group-name", asMock, ec2Mock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = group.ReduceCapacity(int64(len(instancesToTerminate)), drainerMock)
+	if err != nil {
+		t.Errorf("err = %#v; want nil", err)
+	}
+
+	instanceIdsToTerminate := make([]string, len(instancesToTerminate))
+	for i, instance := range instancesToTerminate {
+		instanceIdsToTerminate[i] = *instance.InstanceId
+	}
+	if !matchSlice(detachedInstanceIds, instanceIdsToTerminate) {
+		t.Errorf("detachedInstanceIds = %v; want %v", detachedInstanceIds, instanceIdsToTerminate)
+	}
+	if !matchSlice(terminatedInstanceIds, instanceIdsToTerminate) {
+		t.Errorf("terminatedInstanceIds = %v; want %v", terminatedInstanceIds, instanceIdsToTerminate)
+	}
+
 }

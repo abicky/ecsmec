@@ -50,6 +50,185 @@ make install
 
 ## Usage
 
+### reduce-cluster-capacity
+
+```
+$ ecsmec reduce-cluster-capacity --help
+This command reduces the capacity of the specified cluster safely
+that belong to the auto scaling group or spot fleet request.
+
+Usage:
+  ecsmec reduce-cluster-capacity [flags]
+
+Flags:
+      --amount int                      The amount of the capacity to reduce (required)
+      --auto-scaling-group-name GROUP   The name of the target GROUP
+      --cluster CLUSTER                 The name of the target CLUSTER (default "default")
+  -h, --help                            help for reduce-cluster-capacity
+      --spot-fleet-request-id REQUEST   The ID of the target REQUEST
+
+Global Flags:
+      --profile string   An AWS profile name in your credential file
+      --region string    The AWS region
+```
+
+This command does the following operations if `--auto-scaling-group-name` is specified:
+
+1. Drain container instances and stop tasks that are running on the instances and don't belong to a service
+    - See the [AWS document](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/container-instance-draining.html) for more details on container instance draining
+1. Detach the instances from the auto scaling group
+1. Terminate the instances
+
+and does the following operations if `--spot-fleet-request-id` is specified:
+
+1. Create a SQS queue to receive interruption warnings
+1. Reduce the capacity of the spot fleet request
+1. Poll the SQS queue, and then drain container instances and stop tasks that are running on the instances and don't belong to a service
+    - You might think this operation is not necessary if [ECS_ENABLE_SPOT_INSTANCE_DRAINING](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/container-instance-spot.html#spot-instance-draining) is set to true, but draining doesn't stop tasks that don't belong to a service.
+1. Delete the SQS queue
+
+You need the following permissions to execute the command:
+
+For a auto scaling group:
+
+```
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "autoscaling:DetachInstances"
+      ],
+      "Resource": "arn:aws:autoscaling:<region>:<account>:autoScalingGroup:*:autoScalingGroupName/<group>"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "autoscaling:DescribeAutoScalingGroups",
+        "ec2:DescribeInstances",
+        "ec2:TerminateInstances"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ListContainerInstances"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account>:cluster/<cluster>"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeContainerInstances",
+        "ecs:ListTasks",
+        "ecs:UpdateContainerInstancesState"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account>:container-instance/<cluster>/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeTasks",
+        "ecs:StopTask"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account>:task/<cluster>/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeServices"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account>:service/<cluster>/*"
+      ]
+    }
+  ]
+}
+```
+
+For a spot fleet request:
+
+```
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeSpotFleetRequests",
+        "ec2:ModifySpotFleetRequest"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ListContainerInstances"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account>:cluster/<cluster>"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeContainerInstances",
+        "ecs:ListTasks",
+        "ecs:UpdateContainerInstancesState"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account>:container-instance/<cluster>/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeTasks",
+        "ecs:StopTask"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account>:task/<cluster>/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "events:DeleteRule",
+        "events:PutRule",
+        "events:PutTargets",
+        "events:RemoveTargets"
+      ],
+      "Resource": [
+        "arn:aws:events:<region>:<account>:rule/ecsmec-forward-ec2-spot-instance-interruption-warnings"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "sqs:CreateQueue",
+        "sqs:DeleteMessage",
+        "sqs:DeleteMessageBatch",
+        "sqs:DeleteQueue",
+        "sqs:GetQueueAttributes",
+        "sqs:ReceiveMessage",
+        "sqs:SetQueueAttributes"
+      ],
+      "Resource": [
+        "arn:aws:sqs:<region>:<account>:ecsmec-ec2-spot-instance-interruption-warnings"
+      ]
+    }
+  ]
+}
+```
+
 ### replace-auto-scaling-group-instances
 
 ```

@@ -71,6 +71,10 @@ func (asg *AutoScalingGroup) ReplaceInstances(drainer Drainer) error {
 	return nil
 }
 
+func (asg *AutoScalingGroup) ReduceCapacity(amount int64, drainer Drainer) error {
+	return asg.terminateInstances(amount, drainer)
+}
+
 func (asg *AutoScalingGroup) reload() error {
 	resp, err := asg.asSvc.DescribeAutoScalingGroups(&autoscaling.DescribeAutoScalingGroupsInput{
 		AutoScalingGroupNames: []*string{aws.String(asg.name)},
