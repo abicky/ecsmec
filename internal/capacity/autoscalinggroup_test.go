@@ -14,38 +14,8 @@ import (
 	"github.com/abicky/ecsmec/internal/const/autoscalingconst"
 	"github.com/abicky/ecsmec/internal/sliceutil"
 	"github.com/abicky/ecsmec/internal/testing/mocks"
+	"github.com/abicky/ecsmec/internal/testing/testutil"
 )
-
-func inOrder(calls ...*gomock.Call) *gomock.Call {
-	gomock.InOrder(calls...)
-	return calls[len(calls)-1]
-}
-
-func matchSlice(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	aMap := make(map[string]int, len(a))
-	for _, s := range a {
-		aMap[s]++
-	}
-	for _, s := range b {
-		if _, ok := aMap[s]; !ok {
-			return false
-		}
-		aMap[s]--
-		if aMap[s] == 0 {
-			delete(aMap, s)
-		}
-	}
-
-	if len(aMap) > 0 {
-		return false
-	}
-
-	return true
-}
 
 func createReservation(instance *autoscaling.Instance, launchTime time.Time) *ec2.Reservation {
 	return createReservations([]*autoscaling.Instance{instance}, launchTime)[0]
@@ -92,7 +62,7 @@ func expectLaunchNewInstances(
 		}
 	}
 
-	return inOrder(
+	return testutil.InOrder(
 		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
 			AutoScalingGroups: []*autoscaling.Group{
 				{
@@ -182,7 +152,7 @@ func expectTerminateInstances(
 ) *gomock.Call {
 	t.Helper()
 
-	return inOrder(
+	return testutil.InOrder(
 		ec2Mock.EXPECT().DescribeInstances(gomock.Any()).Return(&ec2.DescribeInstancesOutput{
 			Reservations: append(reservationsToTerminate, reservationsToKeep...),
 		}, nil),
@@ -195,7 +165,7 @@ func expectTerminateInstances(
 				want[i] = *instance.InstanceId
 			}
 			got := aws.StringValueSlice(input.InstanceIds)
-			if !matchSlice(want, got) {
+			if !testutil.MatchSlice(want, got) {
 				t.Errorf("input.InstanceIds = %v; want %v", got, want)
 			}
 		}),
@@ -206,7 +176,7 @@ func expectTerminateInstances(
 				want[i] = *instance.InstanceId
 			}
 			got := aws.StringValueSlice(input.InstanceIds)
-			if !matchSlice(want, got) {
+			if !testutil.MatchSlice(want, got) {
 				t.Errorf("input.InstanceIds = %v; want %v", got, want)
 			}
 		}),
@@ -235,7 +205,7 @@ func expectRestoreState(
 ) *gomock.Call {
 	t.Helper()
 
-	return inOrder(
+	return testutil.InOrder(
 		asMock.EXPECT().UpdateAutoScalingGroup(gomock.Any()).Do(func(input *autoscaling.UpdateAutoScalingGroupInput) {
 			if input.DesiredCapacity != nil {
 				t.Errorf("DesiredCapacity = %d; want nil", *input.DesiredCapacity)
@@ -759,10 +729,10 @@ func TestAutoScalingGroup_ReduceCapacity(t *testing.T) {
 	for i, instance := range instancesToTerminate {
 		instanceIdsToTerminate[i] = *instance.InstanceId
 	}
-	if !matchSlice(detachedInstanceIds, instanceIdsToTerminate) {
+	if !testutil.MatchSlice(detachedInstanceIds, instanceIdsToTerminate) {
 		t.Errorf("detachedInstanceIds = %v; want %v", detachedInstanceIds, instanceIdsToTerminate)
 	}
-	if !matchSlice(terminatedInstanceIds, instanceIdsToTerminate) {
+	if !testutil.MatchSlice(terminatedInstanceIds, instanceIdsToTerminate) {
 		t.Errorf("terminatedInstanceIds = %v; want %v", terminatedInstanceIds, instanceIdsToTerminate)
 	}
 

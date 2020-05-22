@@ -50,6 +50,103 @@ make install
 
 ## Usage
 
+### recreate-service
+
+```
+$ ecsmec recreate-service --help
+This command creates a new service from the specified service with overrides,
+and after the new service becomes stable, it deletes the old one.
+Therefore, as necessary, you have to increase the capacity of the cluster the
+service belongs to manually so that it has enough capacity for the new service
+to place its tasks.
+
+Usage:
+  ecsmec recreate-service [flags]
+
+Examples:
+  You can change the placement strategy of the service "test" in the default cluster
+  by the following command:
+
+    ecsmec recreate-service --service test --overrides '{
+      "PlacementStrategy": [
+        { "Field": "attribute:ecs.availability-zone", "Type": "spread" },
+        { "Field": "CPU", "Type": "binpack" }
+      ]
+    }'
+
+  In the same way, you can change the name of the service "test" in the default
+  cluster like below:
+
+    ecsmec recreate-service --service test --overrides '{
+      "ServiceName": "new-name"
+    }'
+
+
+Flags:
+      --cluster CLUSTER   The name of the target CLUSTER (default "default")
+  -h, --help              help for recreate-service
+      --overrides JSON    An JSON to override some fields of the new service (default "{}")
+      --service SERVICE   The name of the target SERVICE (required)
+
+Global Flags:
+      --profile string   An AWS profile name in your credential file
+      --region string    The AWS region
+```
+
+The option "overrides" is in the same format as the [CreateService API](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_CreateService.html) parameter, except that the first letter of each field is uppercase.
+Although the [UpdateService API](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_UpdateService.html) supports updating the task placement strategies and constraints, the feature is still in preview and the command helps you to update the task placement strategies and constraints safely.
+
+This command does the following operations to recreate the specified service:
+
+1. Create a temporal service from the service with overrides
+1. Delete the old service
+1. Create a new service from the temporal service
+1. Delete the temporal service
+
+If the service name is overridden, the operations change as follow:
+
+1. Create a new service from the service with overrides
+1. Delete the old service
+
+
+You need the following permissions to execute the command:
+
+```
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:ListTasks"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeTasks"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account-id>:task/<cluster>/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateService",
+        "ecs:DeleteService",
+        "ecs:DescribeServices",
+        "ecs:UpdateService"
+      ],
+      "Resource": [
+        "arn:aws:ecs:<region>:<account-id>:service/<cluster>/*"
+      ]
+    }
+  ]
+}
+```
+
 ### reduce-cluster-capacity
 
 ```
