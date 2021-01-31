@@ -32,8 +32,7 @@ type AutoScalingGroup struct {
 
 func NewAutoScalingGroup(name string, asSvc autoscalingiface.AutoScalingAPI, ec2Svc ec2iface.EC2API) (*AutoScalingGroup, error) {
 	asg := AutoScalingGroup{asSvc: asSvc, ec2Svc: ec2Svc, name: name}
-	err := asg.reload()
-	if err != nil {
+	if err := asg.reload(); err != nil {
 		return nil, err
 	}
 	return &asg, nil
@@ -87,34 +86,31 @@ func (asg *AutoScalingGroup) reload() error {
 		return xerrors.Errorf("the auto scaling group \"%s\" doesn't exist", asg.name)
 	}
 
-	group := resp.AutoScalingGroups[0]
-	originalDesiredCapacity := *group.DesiredCapacity
-	originalMaxSize := *group.MaxSize
-	var stateSavedAt time.Time
-	for _, t := range group.Tags {
+	asg.Group = resp.AutoScalingGroups[0]
+	asg.OriginalDesiredCapacity = asg.DesiredCapacity
+	asg.OriginalMaxSize = asg.MaxSize
+	for _, t := range asg.Tags {
 		switch *t.Key {
 		case "ecsmec:OriginalDesiredCapacity":
-			originalDesiredCapacity, err = strconv.ParseInt(*t.Value, 10, 64)
+			originalDesiredCapacity, err := strconv.ParseInt(*t.Value, 10, 64)
 			if err != nil {
 				return xerrors.Errorf("ecsmec:OriginalDesiredCapacity is invalid (%s): %w", *t.Value, err)
 			}
+			asg.OriginalDesiredCapacity = &originalDesiredCapacity
 		case "ecsmec:OriginalMaxSize":
-			originalMaxSize, err = strconv.ParseInt(*t.Value, 10, 64)
+			originalMaxSize, err := strconv.ParseInt(*t.Value, 10, 64)
 			if err != nil {
 				return xerrors.Errorf("ecsmec:OriginalMaxSize is invalid (%s): %w", *t.Value, err)
 			}
+			asg.OriginalMaxSize = &originalMaxSize
 		case "ecsmec:StateSavedAt":
-			stateSavedAt, err = time.Parse(time.RFC3339, *t.Value)
+			stateSavedAt, err := time.Parse(time.RFC3339, *t.Value)
 			if err != nil {
 				return xerrors.Errorf("ecsmec:StateSavedAt is invalid (%s): %w", *t.Value, err)
 			}
 			asg.StateSavedAt = &stateSavedAt
 		}
 	}
-
-	asg.Group = group
-	asg.OriginalDesiredCapacity = &originalDesiredCapacity
-	asg.OriginalMaxSize = &originalMaxSize
 
 	return nil
 }

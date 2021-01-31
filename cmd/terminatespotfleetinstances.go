@@ -41,14 +41,12 @@ func terminateSpotFleetInstances(cmd *cobra.Command, args []string) error {
 		return newRuntimeError("failed to initialize a session: %w", err)
 	}
 
-	var sfr *capacity.SpotFleetRequest
-	sfr, err = capacity.NewSpotFleetRequest(id, ec2.New(sess))
+	sfr, err := capacity.NewSpotFleetRequest(id, ec2.New(sess))
 	if err != nil {
 		return newRuntimeError("failed to initialize a SpotFleetRequest: %w", err)
 	}
 
-	var drainer capacity.Drainer
-	drainer, err = capacity.NewDrainer(cluster, batchSize, ecs.New(sess))
+	drainer, err := capacity.NewDrainer(cluster, batchSize, ecs.New(sess))
 	if err != nil {
 		return newRuntimeError("failed to initialize a Drainer: %w", err)
 	}

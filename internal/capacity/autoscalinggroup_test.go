@@ -439,8 +439,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			err = group.ReplaceInstances(drainerMock)
-			if err != nil {
+			if err := group.ReplaceInstances(drainerMock); err != nil {
 				t.Errorf("err = %#v; want nil", err)
 			}
 		})
@@ -517,8 +516,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = group.ReplaceInstances(drainerMock)
-		if err != nil {
+		if err := group.ReplaceInstances(drainerMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -584,8 +582,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = group.ReplaceInstances(drainerMock)
-		if err != nil {
+		if err := group.ReplaceInstances(drainerMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -660,8 +657,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = group.ReplaceInstances(drainerMock)
-		if err != nil {
+		if err := group.ReplaceInstances(drainerMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -745,8 +741,7 @@ func TestAutoScalingGroup_ReduceCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = group.ReduceCapacity(int64(len(instancesToTerminate)), drainerMock)
-	if err != nil {
+	if err := group.ReduceCapacity(int64(len(instancesToTerminate)), drainerMock); err != nil {
 		t.Errorf("err = %#v; want nil", err)
 	}
 

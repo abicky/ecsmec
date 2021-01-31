@@ -155,7 +155,7 @@ func (d *drainer) drainContainerInstances(arns []*string, wait bool) error {
 					// Stop tasks manually because tasks that don't belong to a service won't stop
 					// even after their cluster instance's status becomes "DRAINING"
 					log.Printf("Stop the task \"%s\"\n", *t.TaskArn)
-					_, err = d.ecsSvc.StopTask(&ecs.StopTaskInput{
+					_, err := d.ecsSvc.StopTask(&ecs.StopTaskInput{
 						Cluster: t.ClusterArn,
 						Reason:  aws.String("Task stopped by ecsmec"),
 						Task:    t.TaskArn,

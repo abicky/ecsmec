@@ -85,12 +85,11 @@ func (s *Service) copy(cluster string, serviceName string, overrides Definition)
 }
 
 func (s *Service) createAndWaitUntilStable(config *ecs.CreateServiceInput) error {
-	_, err := s.ecsSvc.CreateService(config)
-	if err != nil {
+	if _, err := s.ecsSvc.CreateService(config); err != nil {
 		return xerrors.Errorf("failed to create the service \"%s\": %w", *config.ServiceName, err)
 	}
 
-	err = s.ecsSvc.WaitUntilServicesStable(&ecs.DescribeServicesInput{
+	err := s.ecsSvc.WaitUntilServicesStable(&ecs.DescribeServicesInput{
 		Cluster:  config.Cluster,
 		Services: []*string{config.ServiceName},
 	})
@@ -141,7 +140,7 @@ func (s *Service) stopAndWaitUntilStopped(cluster string, serviceName string) er
 	}
 
 	for arns := range sliceutil.ChunkSlice(taskArns, ecsconst.MaxDescribableTasks) {
-		err = s.ecsSvc.WaitUntilTasksStopped(&ecs.DescribeTasksInput{
+		err := s.ecsSvc.WaitUntilTasksStopped(&ecs.DescribeTasksInput{
 			Cluster: aws.String(cluster),
 			Tasks:   arns,
 		})

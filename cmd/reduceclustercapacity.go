@@ -63,8 +63,7 @@ func reduceClusterCapacity(cmd *cobra.Command, args []string) error {
 		return newRuntimeError("failed to initialize a session: %w", err)
 	}
 
-	var drainer capacity.Drainer
-	drainer, err = capacity.NewDrainer(cluster, ecsconst.MaxListableContainerInstances, ecs.New(sess))
+	drainer, err := capacity.NewDrainer(cluster, ecsconst.MaxListableContainerInstances, ecs.New(sess))
 	if err != nil {
 		return newRuntimeError("failed to initialize a Drainer: %w", err)
 	}
@@ -96,7 +95,7 @@ func reduceClusterCapacity(cmd *cobra.Command, args []string) error {
 			return newRuntimeError("failed to create an event rule for interruption warnings: %w", err)
 		}
 
-		if err = sfr.ReduceCapacity(amount, drainer, capacity.NewSQSQueuePoller(queueURL, sqsSvc)); err != nil {
+		if err := sfr.ReduceCapacity(amount, drainer, capacity.NewSQSQueuePoller(queueURL, sqsSvc)); err != nil {
 			return newRuntimeError("failed to reduce the cluster capacity: %w", err)
 		}
 

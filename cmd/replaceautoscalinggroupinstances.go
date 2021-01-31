@@ -43,14 +43,12 @@ func replaceAutoScalingGroupInstances(cmd *cobra.Command, args []string) error {
 		return newRuntimeError("failed to initialize a session: %w", err)
 	}
 
-	var asg *capacity.AutoScalingGroup
-	asg, err = capacity.NewAutoScalingGroup(name, autoscaling.New(sess), ec2.New(sess))
+	asg, err := capacity.NewAutoScalingGroup(name, autoscaling.New(sess), ec2.New(sess))
 	if err != nil {
 		return newRuntimeError("failed to initialize a AutoScalingGroup: %w", err)
 	}
 
-	var drainer capacity.Drainer
-	drainer, err = capacity.NewDrainer(cluster, batchSize, ecs.New(sess))
+	drainer, err := capacity.NewDrainer(cluster, batchSize, ecs.New(sess))
 	if err != nil {
 		return newRuntimeError("failed to initialize a Drainer: %w", err)
 	}

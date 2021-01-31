@@ -53,8 +53,7 @@ func (p *SQSQueuePoller) PollOnce(callback func([]*sqs.Message) ([]*sqs.DeleteMe
 		return xerrors.Errorf("failed to receive messages: %w", err)
 	}
 
-	var entries []*sqs.DeleteMessageBatchRequestEntry
-	entries, err = callback(resp.Messages)
+	entries, err := callback(resp.Messages)
 	if err != nil {
 		return err
 	}

@@ -76,8 +76,7 @@ func TestSpotFleetRequest_TerminateAllInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = sfr.TerminateAllInstances(drainerMock)
-		if err != nil {
+		if err := sfr.TerminateAllInstances(drainerMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -110,8 +109,7 @@ func TestSpotFleetRequest_TerminateAllInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = sfr.TerminateAllInstances(drainerMock)
-		if err == nil {
+		if err := sfr.TerminateAllInstances(drainerMock); err == nil {
 			t.Errorf("err = nil; want non-nil")
 		}
 	})
@@ -236,8 +234,7 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			err = sfr.ReduceCapacity(tt.amount, drainerMock, pollerMock)
-			if err != nil {
+			if err := sfr.ReduceCapacity(tt.amount, drainerMock, pollerMock); err != nil {
 				t.Errorf("err = %#v; want nil", err)
 			}
 		})
@@ -268,8 +265,7 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = sfr.ReduceCapacity(1, drainerMock, pollerMock)
-		if err != nil {
+		if err := sfr.ReduceCapacity(1, drainerMock, pollerMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -362,8 +358,7 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			err = sfr.ReduceCapacity(4, drainerMock, pollerMock)
-			if err == nil {
+			if err := sfr.ReduceCapacity(4, drainerMock, pollerMock); err == nil {
 				t.Errorf("err = nil; want non-nil")
 			}
 		})

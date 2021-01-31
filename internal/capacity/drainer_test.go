@@ -94,8 +94,7 @@ func TestDrainer_Drain(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = drainer.Drain(instanceIDs)
-		if err != nil {
+		if err := drainer.Drain(instanceIDs); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -125,8 +124,7 @@ func TestDrainer_Drain(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err = drainer.Drain(instanceIDs)
-		if err == nil {
+		if err := drainer.Drain(instanceIDs); err == nil {
 			t.Errorf("err = nil; want non-nil")
 		}
 	})
@@ -225,8 +223,7 @@ func TestDrainer_ProcessInterruptions(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		var entries []*sqs.DeleteMessageBatchRequestEntry
-		entries, err = drainer.ProcessInterruptions(messages)
+		entries, err := drainer.ProcessInterruptions(messages)
 		if err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
@@ -264,8 +261,7 @@ func TestDrainer_ProcessInterruptions(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		var entries []*sqs.DeleteMessageBatchRequestEntry
-		entries, err = drainer.ProcessInterruptions(messages)
+		entries, err := drainer.ProcessInterruptions(messages)
 		if err != nil {
 			t.Errorf("err = nil; want non-nil")
 		}
