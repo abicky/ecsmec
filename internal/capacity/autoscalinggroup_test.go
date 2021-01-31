@@ -359,67 +359,92 @@ func TestNewAutoScalingGroup(t *testing.T) {
 }
 
 func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
-	t.Run("the desired capacity is a multiple of the number of availability zones", func(t *testing.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
+	tests := []struct {
+		name            string
+		desiredCapacity int64
+		maxSize         int64
+		oldInstances    []*autoscaling.Instance
+		newInstances    []*autoscaling.Instance
+	}{
+		{
+			name:            "the desired capacity is a multiple of the number of availability zones",
+			desiredCapacity: 6,
+			maxSize:         8,
+			oldInstances: append(
+				createInstances("ap-northeast-1a", 3),
+				createInstances("ap-northeast-1c", 3)...,
+			),
+			newInstances: append(
+				createInstances("ap-northeast-1a", 3),
+				createInstances("ap-northeast-1c", 3)...,
+			),
+		},
+		{
+			name:            "the desired capacity is not a multiple of the number of availability zones but the number of availability zone is only two",
+			desiredCapacity: 7,
+			maxSize:         8,
+			oldInstances: append(
+				createInstances("ap-northeast-1a", 3),
+				createInstances("ap-northeast-1c", 4)...,
+			),
+			newInstances: append(
+				createInstances("ap-northeast-1a", 4),
+				createInstances("ap-northeast-1c", 3)...,
+			),
+		},
+	}
 
-		desiredCapacity := int64(6)
-		maxSize := int64(8)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-		asMock := mocks.NewMockAutoScalingAPI(ctrl)
-		ec2Mock := mocks.NewMockEC2API(ctrl)
-		drainerMock := mocks.NewMockDrainer(ctrl)
+			asMock := mocks.NewMockAutoScalingAPI(ctrl)
+			ec2Mock := mocks.NewMockEC2API(ctrl)
+			drainerMock := mocks.NewMockDrainer(ctrl)
 
-		now := time.Now().UTC()
-		stateSavedAt := now.Format(time.RFC3339)
+			now := time.Now().UTC()
+			stateSavedAt := now.Format(time.RFC3339)
 
-		oldInstances := append(
-			createInstances("ap-northeast-1a", int(desiredCapacity/2)),
-			createInstances("ap-northeast-1c", int(desiredCapacity/2))...,
-		)
-		oldReservations := createReservations(oldInstances, now.Add(-24*time.Hour))
+			oldReservations := createReservations(tt.oldInstances, now.Add(-24*time.Hour))
+			newReservations := createReservations(tt.newInstances, now)
 
-		newInstances := append(
-			createInstances("ap-northeast-1a", int(desiredCapacity/2)),
-			createInstances("ap-northeast-1c", int(desiredCapacity/2))...,
-		)
-		newReservations := createReservations(newInstances, now)
-
-		gomock.InOrder(
-			asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-				AutoScalingGroups: []*autoscaling.Group{
-					{
-						AutoScalingGroupName: aws.String("autoscaling-group-name"),
-						AvailabilityZones: []*string{
-							aws.String("ap-northeast-1a"),
-							aws.String("ap-northeast-1c"),
+			gomock.InOrder(
+				asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+					AutoScalingGroups: []*autoscaling.Group{
+						{
+							AutoScalingGroupName: aws.String("autoscaling-group-name"),
+							AvailabilityZones: []*string{
+								aws.String("ap-northeast-1a"),
+								aws.String("ap-northeast-1c"),
+							},
+							DesiredCapacity: aws.Int64(tt.desiredCapacity),
+							Instances:       tt.oldInstances,
+							MaxSize:         aws.Int64(tt.maxSize),
 						},
-						DesiredCapacity: aws.Int64(desiredCapacity),
-						Instances:       oldInstances,
-						MaxSize:         aws.Int64(maxSize),
 					},
-				},
-			}, nil),
+				}, nil),
 
-			ec2Mock.EXPECT().DescribeInstances(gomock.Any()).Return(&ec2.DescribeInstancesOutput{
-				Reservations: oldReservations,
-			}, nil),
+				ec2Mock.EXPECT().DescribeInstances(gomock.Any()).Return(&ec2.DescribeInstancesOutput{
+					Reservations: oldReservations,
+				}, nil),
 
-			expectLaunchNewInstances(t, asMock, oldInstances, newInstances, desiredCapacity, maxSize, stateSavedAt),
-			expectTerminateInstances(t, asMock, ec2Mock, drainerMock, oldInstances, newInstances, oldReservations, newReservations, desiredCapacity, maxSize),
-			expectRestoreState(t, asMock, desiredCapacity, maxSize, stateSavedAt),
-		)
+				expectLaunchNewInstances(t, asMock, tt.oldInstances, tt.newInstances, tt.desiredCapacity, tt.maxSize, stateSavedAt),
+				expectTerminateInstances(t, asMock, ec2Mock, drainerMock, tt.oldInstances, tt.newInstances, oldReservations, newReservations, tt.desiredCapacity, tt.maxSize),
+				expectRestoreState(t, asMock, tt.desiredCapacity, tt.maxSize, stateSavedAt),
+			)
 
-		group, err := capacity.NewAutoScalingGroup("autoscaling-group-name", asMock, ec2Mock)
-		if err != nil {
-			t.Fatal(err)
-		}
+			group, err := capacity.NewAutoScalingGroup("autoscaling-group-name", asMock, ec2Mock)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		err = group.ReplaceInstances(drainerMock)
-		if err != nil {
-			t.Errorf("err = %#v; want nil", err)
-		}
-	})
+			err = group.ReplaceInstances(drainerMock)
+			if err != nil {
+				t.Errorf("err = %#v; want nil", err)
+			}
+		})
+	}
 
 	t.Run("the desired capacity is not a multiple of the number of availability zones", func(t *testing.T) {
 		ctrl := gomock.NewController(t)

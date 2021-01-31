@@ -149,18 +149,18 @@ func (asg *AutoScalingGroup) launchNewInstances(oldInstanceCount int) error {
 	}
 	requiredCount := int64(oldInstanceCount)
 
-	// The new desired capacity must be a multiple of the number of availability zones,
-	// otherwise AZRebalance will terminate some instances unexpectedly.
-	// Assume that there are following instances on each availability zone:
-	//   ap-northeast-1a: 2, ap-northeast-1c: 1, ap-northeast-1d: 2
-	// After increasing the desired capacity to 10, that is, launching new instances as many as the old instances,
-	// the number of instances will change as below:
-	//   ap-northeast-1a: 3 (old: 2, new: 1), ap-northeast-1c: 4 (old: 1, new: 3), ap-northeast-1d: 3 (old: 2, new: 1)
-	// After terminating old instances, the number of instances will change as below:
-	//   ap-northeast-1a: 1, ap-northeast-1c: 3, ap-northeast-1d: 1
-	// AZRebalance will launch another instance in ap-northeast-1a or ap-northeast-1d and terminate one
-	// in ap-northeast-1c without draining it.
-	if *asg.OriginalDesiredCapacity%int64(len(asg.AvailabilityZones)) > 0 {
+	if len(asg.AvailabilityZones) > 2 && *asg.OriginalDesiredCapacity%int64(len(asg.AvailabilityZones)) > 0 {
+		// If there are more than two availability zones, the new desired capacity must be a multiple of the number of
+		// availability zones, otherwise AZRebalance will terminate some instances unexpectedly.
+		// Assume that there are following instances in each availability zone:
+		//   ap-northeast-1a: 2, ap-northeast-1c: 1, ap-northeast-1d: 2
+		// After increasing the desired capacity to 10, that is, launching new instances as many as the old instances,
+		// the number of instances will change as below:
+		//   ap-northeast-1a: 3 (old: 2, new: 1), ap-northeast-1c: 4 (old: 1, new: 3), ap-northeast-1d: 3 (old: 2, new: 1)
+		// After terminating old instances, the number of instances will change as below:
+		//   ap-northeast-1a: 1, ap-northeast-1c: 3, ap-northeast-1d: 1
+		// AZRebalance will launch another instance in ap-northeast-1a or ap-northeast-1d and terminate one
+		// in ap-northeast-1c without draining it.
 		requiredCount += int64(len(asg.AvailabilityZones)) - *asg.OriginalDesiredCapacity%int64(len(asg.AvailabilityZones))
 	}
 
@@ -360,16 +360,24 @@ func (asg *AutoScalingGroup) fetchSortedInstanceIDs(count int64) ([]string, erro
 
 	azs := make([]string, 0)
 	azToInstances := make(map[string][]*ec2.Instance)
+	azToOldInstanceCount := make(map[string]int)
 	for _, i := range instances {
 		az := *i.Placement.AvailabilityZone
 		if !sliceutil.Contains(azs, az) {
 			azs = append(azs, az)
 		}
 		azToInstances[az] = append(azToInstances[az], i)
+		if asg.StateSavedAt != nil && i.LaunchTime.Before(*asg.StateSavedAt) {
+			azToOldInstanceCount[az] += 1
+		}
 	}
 
 	sort.SliceStable(azs, func(i, j int) bool {
-		return len(azToInstances[azs[i]]) > len(azToInstances[azs[j]])
+		if len(azToInstances[azs[i]]) == len(azToInstances[azs[j]]) {
+			return azToOldInstanceCount[azs[i]] > azToOldInstanceCount[azs[j]]
+		} else {
+			return len(azToInstances[azs[i]]) > len(azToInstances[azs[j]])
+		}
 	})
 
 	sortedInstanceIDs := make([]string, 0, count)
