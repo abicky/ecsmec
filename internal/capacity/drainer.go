@@ -250,7 +250,7 @@ func (d *drainer) processContainerInstances(instanceIDs []string, callback func(
 		return xerrors.Errorf("failed to list container instances: %w", err)
 	}
 	if pageErr != nil {
-		return xerrors.Errorf("failed to list container instances: %w", err)
+		return xerrors.Errorf("failed to list container instances: %w", pageErr)
 	}
 
 	return nil
