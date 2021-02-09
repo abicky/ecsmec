@@ -9,7 +9,7 @@ import (
 	"golang.org/x/xerrors"
 )
 
-const version = "0.1.0"
+const version = "0.1.1"
 
 // This variable should be overwritten by -ldflags
 var revision = "HEAD"
