@@ -166,18 +166,22 @@ func (s *Service) delete(cluster string, serviceName string) error {
 }
 
 func retryOnServiceCreationTempErr(fn func() error, tries int) error {
+	var err error
 	for i := 0; i < tries; i++ {
-		if err := fn(); err != nil {
-			var e *ecs.InvalidParameterException
-			if xerrors.As(err, &e) && e.Message() == "Unable to Start a service that is still Draining." {
-				time.Sleep(time.Second)
-				continue
-			}
-			return err
+		if err = fn(); err == nil {
+			break
 		}
 
-		break
+		var e *ecs.InvalidParameterException
+		if !xerrors.As(err, &e) || e.Message() != "Unable to Start a service that is still Draining." {
+			break
+		}
+
+		if i < tries {
+			log.Printf("Retry to create the service in 1s due to the error \"%s\"", e)
+			time.Sleep(time.Second)
+		}
 	}
 
-	return nil
+	return err
 }
