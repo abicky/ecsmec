@@ -1,6 +1,9 @@
 package service_test
 
 import (
+	"io/ioutil"
+	"log"
+	"os"
 	"reflect"
 	"testing"
 
@@ -12,6 +15,11 @@ import (
 	"github.com/abicky/ecsmec/internal/testing/mocks"
 	"github.com/abicky/ecsmec/internal/testing/testutil"
 )
+
+func TestMain(m *testing.M) {
+	log.SetOutput(ioutil.Discard)
+	os.Exit(m.Run())
+}
 
 func expectCopy(
 	t *testing.T,
