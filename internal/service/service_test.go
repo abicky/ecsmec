@@ -190,7 +190,7 @@ func TestService_Recreate(t *testing.T) {
 			services: []*ecs.Service{},
 		},
 		{
-			name: "with unknown service name",
+			name: "with inactive service",
 			services: []*ecs.Service{
 				{
 					Status: aws.String("INACTIVE"),

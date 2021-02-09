@@ -39,10 +39,7 @@ func (s *Service) Recreate(cluster string, serviceName string, overrides Definit
 	}
 
 	if newServiceName == nil {
-		err := retryOnServiceCreationTempErr(func() error {
-			return s.copy(cluster, tmpServiceName, Definition{ServiceName: aws.String(serviceName)})
-		}, 60)
-		if err != nil {
+		if err := s.copy(cluster, tmpServiceName, Definition{ServiceName: aws.String(serviceName)}); err != nil {
 			return xerrors.Errorf("failed to copy the service \"%s\" to \"%s\": %w", tmpServiceName, serviceName, err)
 		}
 
@@ -77,7 +74,10 @@ func (s *Service) copy(cluster string, serviceName string, overrides Definition)
 
 	config := def.buildCreateServiceInput()
 	log.Printf("Create the following service and wait for it to become stable\n%#v\n", config)
-	if err := s.createAndWaitUntilStable(config); err != nil {
+	err = retryOnServiceCreationTempErr(func() error {
+		return s.createAndWaitUntilStable(config)
+	}, 60)
+	if err != nil {
 		return xerrors.Errorf("failed to create the service and wait for it to become stable: %w", err)
 	}
 
