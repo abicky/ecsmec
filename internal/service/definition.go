@@ -3,8 +3,8 @@ package service
 import (
 	"strings"
 
+	"dario.cat/mergo"
 	"github.com/aws/aws-sdk-go/service/ecs"
-	"github.com/imdario/mergo"
 )
 
 type Definition ecs.CreateServiceInput
