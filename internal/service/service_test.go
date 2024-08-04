@@ -1,7 +1,7 @@
 package service_test
 
 import (
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"reflect"
@@ -17,7 +17,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	log.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
 	os.Exit(m.Run())
 }
 
