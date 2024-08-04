@@ -8,8 +8,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/autoscaling"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	autoscalingtypes "github.com/aws/aws-sdk-go-v2/service/autoscaling/types"
 )
 
 func TestMain(m *testing.M) {
@@ -17,18 +17,18 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func createInstance(az string) *autoscaling.Instance {
+func createInstance(az string) autoscalingtypes.Instance {
 	return createInstances(az, 1)[0]
 }
 
-func createInstances(az string, size int) []*autoscaling.Instance {
+func createInstances(az string, size int) []autoscalingtypes.Instance {
 	azChar := az[len(az)-1:]
-	instances := make([]*autoscaling.Instance, size)
+	instances := make([]autoscalingtypes.Instance, size)
 	for i := 0; i < size; i++ {
-		instances[i] = &autoscaling.Instance{
+		instances[i] = autoscalingtypes.Instance{
 			AvailabilityZone: aws.String(az),
 			InstanceId:       aws.String(fmt.Sprintf("i-%s%08x%08d", azChar, rand.Int31(), i)),
-			LifecycleState:   aws.String("InService"),
+			LifecycleState:   "InService",
 		}
 	}
 

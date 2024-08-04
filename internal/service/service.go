@@ -1,12 +1,13 @@
 package service
 
 import (
+	"context"
 	"log"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/ecs"
-	"github.com/aws/aws-sdk-go/service/ecs/ecsiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"golang.org/x/xerrors"
 
 	"github.com/abicky/ecsmec/internal/const/ecsconst"
@@ -14,36 +15,36 @@ import (
 )
 
 type Service struct {
-	ecsSvc ecsiface.ECSAPI
+	ecsSvc ECSAPI
 }
 
-func NewService(ecsSvc ecsiface.ECSAPI) *Service {
+func NewService(ecsSvc ECSAPI) *Service {
 	return &Service{
 		ecsSvc,
 	}
 }
 
-func (s *Service) Recreate(cluster string, serviceName string, overrides Definition) error {
+func (s *Service) Recreate(ctx context.Context, cluster string, serviceName string, overrides Definition) error {
 	newServiceName := overrides.ServiceName
 	tmpServiceName := serviceName + "-copied-by-ecsmec"
 	if newServiceName == nil {
 		overrides.ServiceName = aws.String(tmpServiceName)
 	}
 
-	if err := s.copy(cluster, serviceName, overrides); err != nil {
+	if err := s.copy(ctx, cluster, serviceName, overrides); err != nil {
 		return xerrors.Errorf("failed to copy the service \"%s\" to \"%s\": %w", serviceName, *overrides.ServiceName, err)
 	}
 
-	if err := s.stopAndDelete(cluster, serviceName); err != nil {
+	if err := s.stopAndDelete(ctx, cluster, serviceName); err != nil {
 		return xerrors.Errorf("failed to stop and delete the service \"%s\": %w", serviceName, err)
 	}
 
 	if newServiceName == nil {
-		if err := s.copy(cluster, tmpServiceName, Definition{ServiceName: aws.String(serviceName)}); err != nil {
+		if err := s.copy(ctx, cluster, tmpServiceName, Definition{ServiceName: aws.String(serviceName)}); err != nil {
 			return xerrors.Errorf("failed to copy the service \"%s\" to \"%s\": %w", tmpServiceName, serviceName, err)
 		}
 
-		if err := s.stopAndDelete(cluster, tmpServiceName); err != nil {
+		if err := s.stopAndDelete(ctx, cluster, tmpServiceName); err != nil {
 			return xerrors.Errorf("failed to stop and delete the service \"%s\": %w", tmpServiceName, err)
 		}
 	}
@@ -51,11 +52,11 @@ func (s *Service) Recreate(cluster string, serviceName string, overrides Definit
 	return nil
 }
 
-func (s *Service) copy(cluster string, serviceName string, overrides Definition) error {
-	resp, err := s.ecsSvc.DescribeServices(&ecs.DescribeServicesInput{
+func (s *Service) copy(ctx context.Context, cluster string, serviceName string, overrides Definition) error {
+	resp, err := s.ecsSvc.DescribeServices(ctx, &ecs.DescribeServicesInput{
 		Cluster:  aws.String(cluster),
-		Include:  []*string{aws.String("TAGS")},
-		Services: []*string{aws.String(serviceName)},
+		Include:  []ecstypes.ServiceField{"TAGS"},
+		Services: []string{serviceName},
 	})
 	if err != nil {
 		return xerrors.Errorf("failed to describe the service \"%s\": %w", serviceName, err)
@@ -75,7 +76,7 @@ func (s *Service) copy(cluster string, serviceName string, overrides Definition)
 	config := def.buildCreateServiceInput()
 	log.Printf("Create the following service and wait for it to become stable\n%#v\n", config)
 	err = retryOnServiceCreationTempErr(func() error {
-		return s.createAndWaitUntilStable(config)
+		return s.createAndWaitUntilStable(ctx, config)
 	}, 60)
 	if err != nil {
 		return xerrors.Errorf("failed to create the service and wait for it to become stable: %w", err)
@@ -84,15 +85,18 @@ func (s *Service) copy(cluster string, serviceName string, overrides Definition)
 	return nil
 }
 
-func (s *Service) createAndWaitUntilStable(config *ecs.CreateServiceInput) error {
-	if _, err := s.ecsSvc.CreateService(config); err != nil {
+func (s *Service) createAndWaitUntilStable(ctx context.Context, config *ecs.CreateServiceInput) error {
+	if _, err := s.ecsSvc.CreateService(ctx, config); err != nil {
 		return xerrors.Errorf("failed to create the service \"%s\": %w", *config.ServiceName, err)
 	}
 
-	err := s.ecsSvc.WaitUntilServicesStable(&ecs.DescribeServicesInput{
-		Cluster:  config.Cluster,
-		Services: []*string{config.ServiceName},
+	waiter := ecs.NewServicesStableWaiter(s.ecsSvc, func(o *ecs.ServicesStableWaiterOptions) {
+		o.MaxDelay = 15 * time.Second
 	})
+	err := waiter.Wait(ctx, &ecs.DescribeServicesInput{
+		Cluster:  config.Cluster,
+		Services: []string{*config.ServiceName},
+	}, 10*time.Minute)
 	if err != nil {
 		return xerrors.Errorf("failed to wait for the service \"%s\" to become stable: %w", *config.ServiceName, err)
 	}
@@ -100,50 +104,54 @@ func (s *Service) createAndWaitUntilStable(config *ecs.CreateServiceInput) error
 	return nil
 }
 
-func (s *Service) stopAndDelete(cluster string, serviceName string) error {
+func (s *Service) stopAndDelete(ctx context.Context, cluster string, serviceName string) error {
 	log.Printf("Stop all the tasks of the service \"%s\" and wait for them to stop\n", serviceName)
-	if err := s.stopAndWaitUntilStopped(cluster, serviceName); err != nil {
+	if err := s.stopAndWaitUntilStopped(ctx, cluster, serviceName); err != nil {
 		return xerrors.Errorf("failed to stop all the tasks of the service and wait for them to stop: %w", err)
 	}
 
 	log.Printf("Delete the service \"%s\"\n", serviceName)
-	if err := s.delete(cluster, serviceName); err != nil {
+	if err := s.delete(ctx, cluster, serviceName); err != nil {
 		return xerrors.Errorf("failed to delete the service: %w", err)
 	}
 
 	return nil
 }
 
-func (s *Service) stopAndWaitUntilStopped(cluster string, serviceName string) error {
-	taskArns := make([]*string, 0)
+func (s *Service) stopAndWaitUntilStopped(ctx context.Context, cluster string, serviceName string) error {
+	taskArns := make([]string, 0)
 	params := &ecs.ListTasksInput{
 		Cluster:       aws.String(cluster),
-		DesiredStatus: aws.String("RUNNING"),
+		DesiredStatus: "RUNNING",
 		ServiceName:   aws.String(serviceName),
 	}
 
-	err := s.ecsSvc.ListTasksPages(params, func(page *ecs.ListTasksOutput, lastPage bool) bool {
+	paginator := ecs.NewListTasksPaginator(s.ecsSvc, params)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return xerrors.Errorf("failed to list tasks: %w", err)
+		}
 		taskArns = append(taskArns, page.TaskArns...)
-		return true
-	})
-	if err != nil {
-		return xerrors.Errorf("failed to list tasks: %w", err)
 	}
 
-	_, err = s.ecsSvc.UpdateService(&ecs.UpdateServiceInput{
+	_, err := s.ecsSvc.UpdateService(ctx, &ecs.UpdateServiceInput{
 		Cluster:      aws.String(cluster),
-		DesiredCount: aws.Int64(0),
+		DesiredCount: aws.Int32(0),
 		Service:      aws.String(serviceName),
 	})
 	if err != nil {
 		return xerrors.Errorf("failed to update the desired count to 0: %w", err)
 	}
 
+	waiter := ecs.NewTasksStoppedWaiter(s.ecsSvc, func(o *ecs.TasksStoppedWaiterOptions) {
+		o.MaxDelay = 6 * time.Second
+	})
 	for arns := range sliceutil.ChunkSlice(taskArns, ecsconst.MaxDescribableTasks) {
-		err := s.ecsSvc.WaitUntilTasksStopped(&ecs.DescribeTasksInput{
+		err := waiter.Wait(ctx, &ecs.DescribeTasksInput{
 			Cluster: aws.String(cluster),
 			Tasks:   arns,
-		})
+		}, 10*time.Minute)
 		if err != nil {
 			return xerrors.Errorf("failed to wait for tasks to stop: %w", err)
 		}
@@ -152,8 +160,8 @@ func (s *Service) stopAndWaitUntilStopped(cluster string, serviceName string) er
 	return nil
 }
 
-func (s *Service) delete(cluster string, serviceName string) error {
-	_, err := s.ecsSvc.DeleteService(&ecs.DeleteServiceInput{
+func (s *Service) delete(ctx context.Context, cluster string, serviceName string) error {
+	_, err := s.ecsSvc.DeleteService(ctx, &ecs.DeleteServiceInput{
 		Cluster: aws.String(cluster),
 		Service: aws.String(serviceName),
 	})
@@ -171,8 +179,8 @@ func retryOnServiceCreationTempErr(fn func() error, tries int) error {
 			break
 		}
 
-		var e *ecs.InvalidParameterException
-		if !xerrors.As(err, &e) || e.Message() != "Unable to Start a service that is still Draining." {
+		var e *ecstypes.InvalidParameterException
+		if !xerrors.As(err, &e) || e.ErrorMessage() != "Unable to Start a service that is still Draining." {
 			break
 		}
 

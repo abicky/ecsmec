@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
 	"github.com/abicky/ecsmec/internal/service"
 )
@@ -13,59 +13,64 @@ import (
 func TestNewDefinitionFromExistingService(t *testing.T) {
 	tests := []struct {
 		name string
-		s    *ecs.Service
+		s    ecstypes.Service
 		want *service.Definition
 	}{
 		{
 			name: "default",
-			s: &ecs.Service{
+			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: aws.String("NONE"),
+				DesiredCount:  1,
+				PropagateTags: "NONE",
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"),
 			},
 			want: &service.Definition{
-				Cluster:       aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: nil,
-				Role:          nil,
+				Cluster:      aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
+				DesiredCount: aws.Int32(1),
+				Role:         nil,
 			},
 		},
 		{
 			name: "when the service linked role has a suffix",
-			s: &ecs.Service{
+			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: aws.String("NONE"),
+				DesiredCount:  1,
+				PropagateTags: "NONE",
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS2"),
 			},
 			want: &service.Definition{
-				Cluster:       aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: nil,
-				Role:          nil,
+				Cluster:      aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
+				DesiredCount: aws.Int32(1),
+				Role:         nil,
 			},
 		},
 		{
 			name: "when PropagateTags is specified",
-			s: &ecs.Service{
+			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: aws.String("TASK_DEFINITION"),
+				DesiredCount:  1,
+				PropagateTags: "TASK_DEFINITION",
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"),
 			},
 			want: &service.Definition{
 				Cluster:       aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: aws.String("TASK_DEFINITION"),
+				DesiredCount:  aws.Int32(1),
+				PropagateTags: "TASK_DEFINITION",
 				Role:          nil,
 			},
 		},
 		{
 			name: "when Role is specified",
-			s: &ecs.Service{
+			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: aws.String("NONE"),
+				DesiredCount:  1,
+				PropagateTags: "NONE",
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/CustomRole"),
 			},
 			want: &service.Definition{
-				Cluster:       aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: nil,
-				Role:          aws.String("arn:aws:iam::123456789:role/CustomRole"),
+				Cluster:      aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
+				DesiredCount: aws.Int32(1),
+				Role:         aws.String("arn:aws:iam::123456789:role/CustomRole"),
 			},
 		},
 	}

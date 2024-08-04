@@ -4,15 +4,17 @@ import (
 	"strings"
 
 	"dario.cat/mergo"
-	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 )
 
 type Definition ecs.CreateServiceInput
 
-func NewDefinitionFromExistingService(s *ecs.Service) *Definition {
+func NewDefinitionFromExistingService(s ecstypes.Service) *Definition {
 	propagateTags := s.PropagateTags
-	if propagateTags != nil && *propagateTags == "NONE" {
-		propagateTags = nil
+	if propagateTags == "NONE" {
+		propagateTags = ""
 	}
 
 	// Delete RoleArn to avoid "InvalidParameterException: You cannot specify an IAM role for services that require
@@ -29,7 +31,7 @@ func NewDefinitionFromExistingService(s *ecs.Service) *Definition {
 		Cluster:                       s.ClusterArn,
 		DeploymentConfiguration:       s.DeploymentConfiguration,
 		DeploymentController:          s.DeploymentController,
-		DesiredCount:                  s.DesiredCount,
+		DesiredCount:                  aws.Int32(s.DesiredCount),
 		EnableECSManagedTags:          s.EnableECSManagedTags,
 		HealthCheckGracePeriodSeconds: s.HealthCheckGracePeriodSeconds,
 		LaunchType:                    s.LaunchType,

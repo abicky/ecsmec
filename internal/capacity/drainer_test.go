@@ -1,17 +1,19 @@
 package capacity_test
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/ecs"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"go.uber.org/mock/gomock"
 
 	"github.com/abicky/ecsmec/internal/capacity"
-	"github.com/abicky/ecsmec/internal/testing/mocks"
+	"github.com/abicky/ecsmec/internal/testing/capacitymock"
 )
 
 func TestDrainer_Drain(t *testing.T) {
@@ -19,52 +21,50 @@ func TestDrainer_Drain(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		ecsMock := mocks.NewMockECSAPI(ctrl)
+		ctx := context.Background()
+
+		ecsMock := capacitymock.NewMockECSAPI(ctrl)
 
 		instances := append(createInstances("ap-northeast-1a", 2), createInstances("ap-northeast-1c", 1)...)
 		instanceIDs := make([]string, len(instances))
-		containerInstanceArns := make([]*string, len(instances))
-		containerInstances := make([]*ecs.ContainerInstance, len(instances))
+		containerInstanceArns := make([]string, len(instances))
+		containerInstances := make([]ecstypes.ContainerInstance, len(instances))
 		for i, instance := range instances {
 			instanceIDs[i] = *instance.InstanceId
 			arn := fmt.Sprintf("arn:aws:ecs:ap-northeast-1:1234:container-instance/test/%s", *instance.InstanceId)
-			containerInstanceArns[i] = aws.String(arn)
-			containerInstances[i] = &ecs.ContainerInstance{
+			containerInstanceArns[i] = arn
+			containerInstances[i] = ecstypes.ContainerInstance{
 				ContainerInstanceArn: aws.String(arn),
 				Ec2InstanceId:        instance.InstanceId,
 			}
 		}
 
-		ecsMock.EXPECT().ListContainerInstancesPages(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(params *ecs.ListContainerInstancesInput, fn func(*ecs.ListContainerInstancesOutput, bool) bool) error {
-				fn(&ecs.ListContainerInstancesOutput{
+		// For ListTasksPaginator
+		ecsMock.EXPECT().ListContainerInstances(ctx, gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, params *ecs.ListContainerInstancesInput, _ ...func(*ecs.Options)) (*ecs.ListContainerInstancesOutput, error) {
+				return &ecs.ListContainerInstancesOutput{
 					ContainerInstanceArns: containerInstanceArns,
-				}, true)
-				return nil
+				}, nil
 			})
 
-		ecsMock.EXPECT().DescribeContainerInstances(gomock.Any()).Return(&ecs.DescribeContainerInstancesOutput{
+		ecsMock.EXPECT().DescribeContainerInstances(ctx, gomock.Any()).Return(&ecs.DescribeContainerInstancesOutput{
 			ContainerInstances: containerInstances,
 		}, nil)
 
-		ecsMock.EXPECT().ListTasksPages(gomock.Any(), gomock.Any()).Times(len(instances)).
-			DoAndReturn(func(params *ecs.ListTasksInput, fn func(*ecs.ListTasksOutput, bool) bool) error {
-				switch *params.ContainerInstance {
-				case *containerInstanceArns[0]:
-					fn(&ecs.ListTasksOutput{
-						TaskArns: []*string{
-							aws.String("arn:aws:ecs:ap-northeast-1:123:task/test/00000000000000000000000000000000"),
-							aws.String("arn:aws:ecs:ap-northeast-1:123:task/test/11111111111111111111111111111111"),
-						},
-					}, true)
-				default:
-					fn(&ecs.ListTasksOutput{TaskArns: []*string{}}, true)
+		ecsMock.EXPECT().ListTasks(ctx, gomock.Any(), gomock.Any()).Times(len(instances)).
+			DoAndReturn(func(_ context.Context, params *ecs.ListTasksInput, _ ...func(*ecs.Options)) (*ecs.ListTasksOutput, error) {
+				output := &ecs.ListTasksOutput{TaskArns: []string{}}
+				if *params.ContainerInstance == containerInstanceArns[0] {
+					output.TaskArns = []string{
+						"arn:aws:ecs:ap-northeast-1:123:task/test/00000000000000000000000000000000",
+						"arn:aws:ecs:ap-northeast-1:123:task/test/11111111111111111111111111111111",
+					}
 				}
-				return nil
+				return output, nil
 			})
 
-		ecsMock.EXPECT().DescribeTasks(gomock.Any()).Return(&ecs.DescribeTasksOutput{
-			Tasks: []*ecs.Task{
+		ecsMock.EXPECT().DescribeTasks(ctx, gomock.Any()).Return(&ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
 				{
 					Group:   aws.String("service:foo"),
 					TaskArn: aws.String("arn:aws:ecs:ap-northeast-1:123:task/test/00000000000000000000000000000000"),
@@ -76,8 +76,8 @@ func TestDrainer_Drain(t *testing.T) {
 			},
 		}, nil)
 
-		ecsMock.EXPECT().StopTask(gomock.Any()).
-			DoAndReturn(func(input *ecs.StopTaskInput) (*ecs.StopTaskOutput, error) {
+		ecsMock.EXPECT().StopTask(ctx, gomock.Any()).
+			DoAndReturn(func(_ context.Context, input *ecs.StopTaskInput, _ ...func(options *ecs.Options)) (*ecs.StopTaskOutput, error) {
 				want := "arn:aws:ecs:ap-northeast-1:123:task/test/11111111111111111111111111111111"
 				if *input.Task != want {
 					t.Errorf("Task = %s; want %s", *input.Task, want)
@@ -85,16 +85,37 @@ func TestDrainer_Drain(t *testing.T) {
 				return nil, nil
 			})
 
-		ecsMock.EXPECT().UpdateContainerInstancesState(gomock.Any()).Return(&ecs.UpdateContainerInstancesStateOutput{}, nil)
-		ecsMock.EXPECT().WaitUntilTasksStopped(gomock.Any()).Return(nil)
-		ecsMock.EXPECT().WaitUntilServicesStable(gomock.Any()).Return(nil)
+		ecsMock.EXPECT().UpdateContainerInstancesState(ctx, gomock.Any()).Return(&ecs.UpdateContainerInstancesStateOutput{}, nil)
+		// For ecs.TasksStoppedWaiter
+		ecsMock.EXPECT().DescribeTasks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
+			return &ecs.DescribeTasksOutput{
+				Tasks: []ecstypes.Task{
+					{
+						LastStatus: aws.String("STOPPED"),
+					},
+				},
+			}, nil
+		})
+		// For ecs.ServicesStableWaiter
+		ecsMock.EXPECT().DescribeServices(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
+			return &ecs.DescribeServicesOutput{
+				Services: []ecstypes.Service{
+					{
+						Deployments:  make([]ecstypes.Deployment, 1),
+						DesiredCount: 0,
+						RunningCount: 0,
+						Status:       aws.String("ACTIVE"),
+					},
+				},
+			}, nil
+		})
 
 		drainer, err := capacity.NewDrainer("test", 10, ecsMock)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if err := drainer.Drain(instanceIDs); err != nil {
+		if err := drainer.Drain(context.Background(), instanceIDs); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -103,7 +124,9 @@ func TestDrainer_Drain(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		ecsMock := mocks.NewMockECSAPI(ctrl)
+		ctx := context.Background()
+
+		ecsMock := capacitymock.NewMockECSAPI(ctrl)
 
 		instances := append(createInstances("ap-northeast-1a", 2), createInstances("ap-northeast-1c", 1)...)
 		instanceIDs := make([]string, len(instances))
@@ -111,12 +134,12 @@ func TestDrainer_Drain(t *testing.T) {
 			instanceIDs[i] = *instance.InstanceId
 		}
 
-		ecsMock.EXPECT().ListContainerInstancesPages(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(params *ecs.ListContainerInstancesInput, fn func(*ecs.ListContainerInstancesOutput, bool) bool) error {
-				fn(&ecs.ListContainerInstancesOutput{
-					ContainerInstanceArns: []*string{},
-				}, true)
-				return nil
+		// For ListContainerInstancesPaginator
+		ecsMock.EXPECT().ListContainerInstances(ctx, gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, params *ecs.ListContainerInstancesInput, _ ...func(options *ecs.Options)) (*ecs.ListContainerInstancesOutput, error) {
+				return &ecs.ListContainerInstancesOutput{
+					ContainerInstanceArns: []string{},
+				}, nil
 			})
 
 		drainer, err := capacity.NewDrainer("test", 10, ecsMock)
@@ -124,7 +147,7 @@ func TestDrainer_Drain(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := drainer.Drain(instanceIDs); err == nil {
+		if err := drainer.Drain(context.Background(), instanceIDs); err == nil {
 			t.Errorf("err = nil; want non-nil")
 		}
 	})
@@ -135,67 +158,66 @@ func TestDrainer_ProcessInterruptions(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		ecsMock := mocks.NewMockECSAPI(ctrl)
+		ctx := context.Background()
+
+		ecsMock := capacitymock.NewMockECSAPI(ctrl)
 
 		instances := append(createInstances("ap-northeast-1a", 2), createInstances("ap-northeast-1c", 1)...)
 		instanceIDs := make([]string, len(instances))
-		containerInstanceArns := make([]*string, len(instances))
-		containerInstances := make([]*ecs.ContainerInstance, len(instances))
-		expectedEntries := make([]*sqs.DeleteMessageBatchRequestEntry, len(instances))
+		containerInstanceArns := make([]string, len(instances))
+		containerInstances := make([]ecstypes.ContainerInstance, len(instances))
+		expectedEntries := make([]sqstypes.DeleteMessageBatchRequestEntry, len(instances))
 		for i, instance := range instances {
 			instanceIDs[i] = *instance.InstanceId
 			arn := fmt.Sprintf("arn:aws:ecs:ap-northeast-1:1234:container-instance/test/%s", *instance.InstanceId)
-			containerInstanceArns[i] = aws.String(arn)
-			containerInstances[i] = &ecs.ContainerInstance{
+			containerInstanceArns[i] = arn
+			containerInstances[i] = ecstypes.ContainerInstance{
 				ContainerInstanceArn: aws.String(arn),
 				Ec2InstanceId:        instance.InstanceId,
 			}
 
-			expectedEntries[i] = &sqs.DeleteMessageBatchRequestEntry{
+			expectedEntries[i] = sqstypes.DeleteMessageBatchRequestEntry{
 				Id:            instance.InstanceId,
 				ReceiptHandle: aws.String("receipt-handle-" + *instance.InstanceId),
 			}
 		}
 
 		otherInstances := createInstances("ap-northeast-1d", 2)
-		messages := make([]*sqs.Message, len(otherInstances)+len(instances))
+		messages := make([]sqstypes.Message, len(otherInstances)+len(instances))
 		for i, instance := range append(otherInstances, instances...) {
-			messages[i] = &sqs.Message{
+			messages[i] = sqstypes.Message{
 				Body:          aws.String(fmt.Sprintf("{\"detail\":{\"instance-id\":\"%s\"}}", *instance.InstanceId)),
 				ReceiptHandle: aws.String("receipt-handle-" + *instance.InstanceId),
 			}
 		}
 
-		ecsMock.EXPECT().ListContainerInstancesPages(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(params *ecs.ListContainerInstancesInput, fn func(*ecs.ListContainerInstancesOutput, bool) bool) error {
-				fn(&ecs.ListContainerInstancesOutput{
+		// For ListContainerInstancesPaginator
+		ecsMock.EXPECT().ListContainerInstances(ctx, gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, params *ecs.ListContainerInstancesInput, _ ...func(options *ecs.Options)) (*ecs.ListContainerInstancesOutput, error) {
+				return &ecs.ListContainerInstancesOutput{
 					ContainerInstanceArns: containerInstanceArns,
-				}, true)
-				return nil
+				}, nil
 			})
 
-		ecsMock.EXPECT().DescribeContainerInstances(gomock.Any()).Return(&ecs.DescribeContainerInstancesOutput{
+		ecsMock.EXPECT().DescribeContainerInstances(ctx, gomock.Any()).Return(&ecs.DescribeContainerInstancesOutput{
 			ContainerInstances: containerInstances,
 		}, nil)
 
-		ecsMock.EXPECT().ListTasksPages(gomock.Any(), gomock.Any()).Times(len(instances)).
-			DoAndReturn(func(params *ecs.ListTasksInput, fn func(*ecs.ListTasksOutput, bool) bool) error {
-				switch *params.ContainerInstance {
-				case *containerInstanceArns[0]:
-					fn(&ecs.ListTasksOutput{
-						TaskArns: []*string{
-							aws.String("arn:aws:ecs:ap-northeast-1:123:task/test/00000000000000000000000000000000"),
-							aws.String("arn:aws:ecs:ap-northeast-1:123:task/test/11111111111111111111111111111111"),
-						},
-					}, true)
-				default:
-					fn(&ecs.ListTasksOutput{TaskArns: []*string{}}, true)
+		// For ListTasksPaginator
+		ecsMock.EXPECT().ListTasks(ctx, gomock.Any(), gomock.Any()).Times(len(instances)).
+			DoAndReturn(func(_ context.Context, params *ecs.ListTasksInput, _ ...func(options *ecs.Options)) (*ecs.ListTasksOutput, error) {
+				output := &ecs.ListTasksOutput{TaskArns: []string{}}
+				if *params.ContainerInstance == containerInstanceArns[0] {
+					output.TaskArns = []string{
+						"arn:aws:ecs:ap-northeast-1:123:task/test/00000000000000000000000000000000",
+						"arn:aws:ecs:ap-northeast-1:123:task/test/11111111111111111111111111111111",
+					}
 				}
-				return nil
+				return output, nil
 			})
 
-		ecsMock.EXPECT().DescribeTasks(gomock.Any()).Return(&ecs.DescribeTasksOutput{
-			Tasks: []*ecs.Task{
+		ecsMock.EXPECT().DescribeTasks(ctx, gomock.Any()).Return(&ecs.DescribeTasksOutput{
+			Tasks: []ecstypes.Task{
 				{
 					Group:   aws.String("service:foo"),
 					TaskArn: aws.String("arn:aws:ecs:ap-northeast-1:123:task/test/00000000000000000000000000000000"),
@@ -207,8 +229,8 @@ func TestDrainer_ProcessInterruptions(t *testing.T) {
 			},
 		}, nil)
 
-		ecsMock.EXPECT().StopTask(gomock.Any()).
-			DoAndReturn(func(input *ecs.StopTaskInput) (*ecs.StopTaskOutput, error) {
+		ecsMock.EXPECT().StopTask(ctx, gomock.Any()).
+			DoAndReturn(func(_ context.Context, input *ecs.StopTaskInput, _ ...func(*ecs.Options)) (*ecs.StopTaskOutput, error) {
 				want := "arn:aws:ecs:ap-northeast-1:123:task/test/11111111111111111111111111111111"
 				if *input.Task != want {
 					t.Errorf("Task = %s; want %s", *input.Task, want)
@@ -216,14 +238,14 @@ func TestDrainer_ProcessInterruptions(t *testing.T) {
 				return nil, nil
 			})
 
-		ecsMock.EXPECT().UpdateContainerInstancesState(gomock.Any()).Return(&ecs.UpdateContainerInstancesStateOutput{}, nil)
+		ecsMock.EXPECT().UpdateContainerInstancesState(ctx, gomock.Any()).Return(&ecs.UpdateContainerInstancesStateOutput{}, nil)
 
 		drainer, err := capacity.NewDrainer("test", 10, ecsMock)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		entries, err := drainer.ProcessInterruptions(messages)
+		entries, err := drainer.ProcessInterruptions(context.Background(), messages)
 		if err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
@@ -237,23 +259,25 @@ func TestDrainer_ProcessInterruptions(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		ecsMock := mocks.NewMockECSAPI(ctrl)
+		ctx := context.Background()
+
+		ecsMock := capacitymock.NewMockECSAPI(ctrl)
 
 		instances := append(createInstances("ap-northeast-1a", 2), createInstances("ap-northeast-1c", 1)...)
-		messages := make([]*sqs.Message, len(instances))
+		messages := make([]sqstypes.Message, len(instances))
 		for i, instance := range instances {
-			messages[i] = &sqs.Message{
+			messages[i] = sqstypes.Message{
 				Body:          aws.String(fmt.Sprintf("{\"detail\":{\"instance-id\":\"%s\"}}", *instance.InstanceId)),
 				ReceiptHandle: aws.String("receipt-handle-" + *instance.InstanceId),
 			}
 		}
 
-		ecsMock.EXPECT().ListContainerInstancesPages(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(params *ecs.ListContainerInstancesInput, fn func(*ecs.ListContainerInstancesOutput, bool) bool) error {
-				fn(&ecs.ListContainerInstancesOutput{
-					ContainerInstanceArns: []*string{},
-				}, true)
-				return nil
+		// For ListContainerInstancesPaginator
+		ecsMock.EXPECT().ListContainerInstances(ctx, gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, params *ecs.ListContainerInstancesInput, _ ...func(options *ecs.Options)) (*ecs.ListContainerInstancesOutput, error) {
+				return &ecs.ListContainerInstancesOutput{
+					ContainerInstanceArns: []string{},
+				}, nil
 			})
 
 		drainer, err := capacity.NewDrainer("test", 10, ecsMock)
@@ -261,7 +285,7 @@ func TestDrainer_ProcessInterruptions(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		entries, err := drainer.ProcessInterruptions(messages)
+		entries, err := drainer.ProcessInterruptions(ctx, messages)
 		if err != nil {
 			t.Errorf("err = nil; want non-nil")
 		}
@@ -274,14 +298,14 @@ func TestDrainer_ProcessInterruptions(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		ecsMock := mocks.NewMockECSAPI(ctrl)
+		ecsMock := capacitymock.NewMockECSAPI(ctrl)
 
 		drainer, err := capacity.NewDrainer("test", 10, ecsMock)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		_, err = drainer.ProcessInterruptions([]*sqs.Message{})
+		_, err = drainer.ProcessInterruptions(context.Background(), []sqstypes.Message{})
 		if err != nil {
 			t.Errorf("err = nil; want non-nil")
 		}

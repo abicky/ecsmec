@@ -1,10 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 	"golang.org/x/xerrors"
 )
@@ -62,13 +63,8 @@ func init() {
 	rootCmd.PersistentFlags().String("region", "", "The AWS region")
 }
 
-func newSession() (*session.Session, error) {
+func newConfig(ctx context.Context) (aws.Config, error) {
 	region, _ := rootCmd.Flags().GetString("region")
 	profile, _ := rootCmd.Flags().GetString("profile")
-	return session.NewSessionWithOptions(session.Options{
-		Config: aws.Config{
-			Region: aws.String(region),
-		},
-		Profile: profile,
-	})
+	return config.LoadDefaultConfig(ctx, config.WithRegion(region), config.WithSharedConfigProfile(profile))
 }

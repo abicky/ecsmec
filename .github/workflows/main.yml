@@ -29,8 +29,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
+      - run: go install go.uber.org/mock/mockgen@latest
+
       # `go test` uses only a high-confidence subset of go vet, so execute also `go vet`
-      - run: go vet ./...
+      - run: make vet
 
       - run: go fmt ./... && git diff --exit-code -- ':!go.sum'
 

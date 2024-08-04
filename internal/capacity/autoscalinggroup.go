@@ -1,17 +1,18 @@
 package capacity
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sort"
 	"strconv"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/autoscaling"
-	"github.com/aws/aws-sdk-go/service/autoscaling/autoscalingiface"
-	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/autoscaling"
+	autoscalingtypes "github.com/aws/aws-sdk-go-v2/service/autoscaling/types"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"golang.org/x/xerrors"
 
 	"github.com/abicky/ecsmec/internal/const/autoscalingconst"
@@ -19,33 +20,33 @@ import (
 )
 
 type AutoScalingGroup struct {
-	OriginalDesiredCapacity *int64
-	OriginalMaxSize         *int64
+	OriginalDesiredCapacity *int32
+	OriginalMaxSize         *int32
 	StateSavedAt            *time.Time
 
-	*autoscaling.Group
+	autoscalingtypes.AutoScalingGroup
 
-	asSvc  autoscalingiface.AutoScalingAPI
-	ec2Svc ec2iface.EC2API
+	asSvc  AutoScalingAPI
+	ec2Svc EC2API
 	name   string
 }
 
-func NewAutoScalingGroup(name string, asSvc autoscalingiface.AutoScalingAPI, ec2Svc ec2iface.EC2API) (*AutoScalingGroup, error) {
+func NewAutoScalingGroup(name string, asSvc AutoScalingAPI, ec2Svc EC2API) (*AutoScalingGroup, error) {
 	asg := AutoScalingGroup{asSvc: asSvc, ec2Svc: ec2Svc, name: name}
-	if err := asg.reload(); err != nil {
+	if err := asg.reload(context.Background()); err != nil {
 		return nil, err
 	}
 	return &asg, nil
 }
 
-func (asg *AutoScalingGroup) ReplaceInstances(drainer Drainer) error {
+func (asg *AutoScalingGroup) ReplaceInstances(ctx context.Context, drainer Drainer) error {
 	oldInstanceIDs := make([]string, 0)
 	baseTime := asg.StateSavedAt
 	if baseTime == nil {
 		baseTime = aws.Time(time.Now())
 	}
 
-	err := asg.fetchInstances(func(i *ec2.Instance) error {
+	err := asg.fetchInstances(ctx, func(i ec2types.Instance) error {
 		if i.LaunchTime.Before(*baseTime) {
 			oldInstanceIDs = append(oldInstanceIDs, *i.InstanceId)
 		}
@@ -55,28 +56,28 @@ func (asg *AutoScalingGroup) ReplaceInstances(drainer Drainer) error {
 		return xerrors.Errorf("failed to fetch old instance IDs: %w", err)
 	}
 
-	if err := asg.launchNewInstances(len(oldInstanceIDs)); err != nil {
+	if err := asg.launchNewInstances(ctx, len(oldInstanceIDs)); err != nil {
 		return xerrors.Errorf("failed to launch new instances: %w", err)
 	}
 
-	if err := asg.terminateInstances(*asg.DesiredCapacity-*asg.OriginalDesiredCapacity, drainer); err != nil {
+	if err := asg.terminateInstances(ctx, *asg.DesiredCapacity-*asg.OriginalDesiredCapacity, drainer); err != nil {
 		return xerrors.Errorf("failed to terminate instances: %w", err)
 	}
 
-	if err := asg.restoreState(); err != nil {
+	if err := asg.restoreState(ctx); err != nil {
 		return xerrors.Errorf("failed to restore the auto scaling group: %w", err)
 	}
 
 	return nil
 }
 
-func (asg *AutoScalingGroup) ReduceCapacity(amount int64, drainer Drainer) error {
-	return asg.terminateInstances(amount, drainer)
+func (asg *AutoScalingGroup) ReduceCapacity(ctx context.Context, amount int32, drainer Drainer) error {
+	return asg.terminateInstances(ctx, amount, drainer)
 }
 
-func (asg *AutoScalingGroup) reload() error {
-	resp, err := asg.asSvc.DescribeAutoScalingGroups(&autoscaling.DescribeAutoScalingGroupsInput{
-		AutoScalingGroupNames: []*string{aws.String(asg.name)},
+func (asg *AutoScalingGroup) reload(ctx context.Context) error {
+	resp, err := asg.asSvc.DescribeAutoScalingGroups(ctx, &autoscaling.DescribeAutoScalingGroupsInput{
+		AutoScalingGroupNames: []string{asg.name},
 	})
 	if err != nil {
 		return xerrors.Errorf("failed to describe the auto scaling group: %w", err)
@@ -86,23 +87,23 @@ func (asg *AutoScalingGroup) reload() error {
 		return xerrors.Errorf("the auto scaling group \"%s\" doesn't exist", asg.name)
 	}
 
-	asg.Group = resp.AutoScalingGroups[0]
+	asg.AutoScalingGroup = resp.AutoScalingGroups[0]
 	asg.OriginalDesiredCapacity = asg.DesiredCapacity
 	asg.OriginalMaxSize = asg.MaxSize
 	for _, t := range asg.Tags {
 		switch *t.Key {
 		case "ecsmec:OriginalDesiredCapacity":
-			originalDesiredCapacity, err := strconv.ParseInt(*t.Value, 10, 64)
+			originalDesiredCapacity, err := strconv.ParseInt(*t.Value, 10, 32)
 			if err != nil {
 				return xerrors.Errorf("ecsmec:OriginalDesiredCapacity is invalid (%s): %w", *t.Value, err)
 			}
-			asg.OriginalDesiredCapacity = &originalDesiredCapacity
+			asg.OriginalDesiredCapacity = aws.Int32(int32(originalDesiredCapacity))
 		case "ecsmec:OriginalMaxSize":
-			originalMaxSize, err := strconv.ParseInt(*t.Value, 10, 64)
+			originalMaxSize, err := strconv.ParseInt(*t.Value, 10, 32)
 			if err != nil {
 				return xerrors.Errorf("ecsmec:OriginalMaxSize is invalid (%s): %w", *t.Value, err)
 			}
-			asg.OriginalMaxSize = &originalMaxSize
+			asg.OriginalMaxSize = aws.Int32(int32(originalMaxSize))
 		case "ecsmec:StateSavedAt":
 			stateSavedAt, err := time.Parse(time.RFC3339, *t.Value)
 			if err != nil {
@@ -115,13 +116,13 @@ func (asg *AutoScalingGroup) reload() error {
 	return nil
 }
 
-func (asg *AutoScalingGroup) fetchInstances(callback func(*ec2.Instance) error) error {
-	ids := make([]*string, len(asg.Instances))
+func (asg *AutoScalingGroup) fetchInstances(ctx context.Context, callback func(ec2types.Instance) error) error {
+	ids := make([]string, len(asg.Instances))
 	for i, instance := range asg.Instances {
-		ids[i] = instance.InstanceId
+		ids[i] = *instance.InstanceId
 	}
 
-	resp, err := asg.ec2Svc.DescribeInstances(&ec2.DescribeInstancesInput{
+	resp, err := asg.ec2Svc.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 		InstanceIds: ids,
 	})
 	if err != nil {
@@ -139,13 +140,13 @@ func (asg *AutoScalingGroup) fetchInstances(callback func(*ec2.Instance) error) 
 	return nil
 }
 
-func (asg *AutoScalingGroup) launchNewInstances(oldInstanceCount int) error {
+func (asg *AutoScalingGroup) launchNewInstances(ctx context.Context, oldInstanceCount int) error {
 	if oldInstanceCount == 0 {
 		return nil
 	}
-	requiredCount := int64(oldInstanceCount)
+	requiredCount := int32(oldInstanceCount)
 
-	if len(asg.AvailabilityZones) > 2 && *asg.OriginalDesiredCapacity%int64(len(asg.AvailabilityZones)) > 0 {
+	if len(asg.AvailabilityZones) > 2 && *asg.OriginalDesiredCapacity%int32(len(asg.AvailabilityZones)) > 0 {
 		// If there are more than two availability zones, the new desired capacity must be a multiple of the number of
 		// availability zones, otherwise AZRebalance will terminate some instances unexpectedly.
 		// Assume that there are following instances in each availability zone:
@@ -157,10 +158,10 @@ func (asg *AutoScalingGroup) launchNewInstances(oldInstanceCount int) error {
 		//   ap-northeast-1a: 1, ap-northeast-1c: 3, ap-northeast-1d: 1
 		// AZRebalance will launch another instance in ap-northeast-1a or ap-northeast-1d and terminate one
 		// in ap-northeast-1c without draining it.
-		requiredCount += int64(len(asg.AvailabilityZones)) - *asg.OriginalDesiredCapacity%int64(len(asg.AvailabilityZones))
+		requiredCount += int32(len(asg.AvailabilityZones)) - *asg.OriginalDesiredCapacity%int32(len(asg.AvailabilityZones))
 	}
 
-	if err := asg.waitUntilInstancesInService(*asg.DesiredCapacity); err != nil {
+	if err := asg.waitUntilInstancesInService(ctx, *asg.DesiredCapacity); err != nil {
 		return xerrors.Errorf("failed to wait until %d instances are in service: %w", *asg.DesiredCapacity, err)
 	}
 
@@ -174,46 +175,46 @@ func (asg *AutoScalingGroup) launchNewInstances(oldInstanceCount int) error {
 		newDesiredMaxSize = newDesiredCapacity
 	}
 
-	if err := asg.saveCurrentState(); err != nil {
+	if err := asg.saveCurrentState(ctx); err != nil {
 		return xerrors.Errorf("failed to save the current state: %w", err)
 	}
 
 	log.Printf("Update the auto scaling group \"%s\": DesirdCapacity: %d, MaxSize: %d\n",
 		*asg.AutoScalingGroupName, newDesiredCapacity, newDesiredMaxSize)
-	_, err := asg.asSvc.UpdateAutoScalingGroup(&autoscaling.UpdateAutoScalingGroupInput{
+	_, err := asg.asSvc.UpdateAutoScalingGroup(ctx, &autoscaling.UpdateAutoScalingGroupInput{
 		AutoScalingGroupName: asg.AutoScalingGroupName,
-		DesiredCapacity:      aws.Int64(newDesiredCapacity),
-		MaxSize:              aws.Int64(newDesiredMaxSize),
+		DesiredCapacity:      aws.Int32(newDesiredCapacity),
+		MaxSize:              aws.Int32(newDesiredMaxSize),
 	})
 	if err != nil {
 		return xerrors.Errorf("failed to update the auto scaling group: %w", err)
 	}
 
-	if err := asg.waitUntilInstancesInService(newDesiredCapacity); err != nil {
+	if err := asg.waitUntilInstancesInService(ctx, newDesiredCapacity); err != nil {
 		return xerrors.Errorf("failed to wait until %d instances are in service: %w", newDesiredCapacity, err)
 	}
 
-	return asg.reload()
+	return asg.reload(ctx)
 }
 
-func (asg *AutoScalingGroup) terminateInstances(count int64, drainer Drainer) error {
+func (asg *AutoScalingGroup) terminateInstances(ctx context.Context, count int32, drainer Drainer) error {
 	if count == 0 {
 		return nil
 	}
 
 	// Sort instanceIDs to prevent AZRebalance from terminating instances unexpectedly
-	sortedInstanceIDs, err := asg.fetchSortedInstanceIDs(count)
+	sortedInstanceIDs, err := asg.fetchSortedInstanceIDs(ctx, count)
 	if err != nil {
 		return xerrors.Errorf("failed to fetch sorted instance IDs: %w", err)
 	}
 
-	if err := drainer.Drain(sortedInstanceIDs); err != nil {
+	if err := drainer.Drain(ctx, sortedInstanceIDs); err != nil {
 		return xerrors.Errorf("failed to drain instances: %w", err)
 	}
 
-	for ids := range sliceutil.ChunkSlice(aws.StringSlice(sortedInstanceIDs), autoscalingconst.MaxDetachableInstances) {
-		log.Println("Detach instances:", aws.StringValueSlice(ids))
-		_, err := asg.asSvc.DetachInstances(&autoscaling.DetachInstancesInput{
+	for ids := range sliceutil.ChunkSlice(sortedInstanceIDs, autoscalingconst.MaxDetachableInstances) {
+		log.Println("Detach instances:", ids)
+		_, err := asg.asSvc.DetachInstances(ctx, &autoscaling.DetachInstancesInput{
 			AutoScalingGroupName:           asg.AutoScalingGroupName,
 			InstanceIds:                    ids,
 			ShouldDecrementDesiredCapacity: aws.Bool(true),
@@ -224,31 +225,34 @@ func (asg *AutoScalingGroup) terminateInstances(count int64, drainer Drainer) er
 	}
 
 	log.Println("Terminate instances:", sortedInstanceIDs)
-	_, err = asg.ec2Svc.TerminateInstances(&ec2.TerminateInstancesInput{
-		InstanceIds: aws.StringSlice(sortedInstanceIDs),
+	_, err = asg.ec2Svc.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
+		InstanceIds: sortedInstanceIDs,
 	})
 	if err != nil {
 		return xerrors.Errorf("failed to terminate the instances: %w", err)
 	}
 
-	err = asg.ec2Svc.WaitUntilInstanceTerminated(&ec2.DescribeInstancesInput{
-		InstanceIds: aws.StringSlice(sortedInstanceIDs),
+	waiter := ec2.NewInstanceTerminatedWaiter(asg.ec2Svc, func(o *ec2.InstanceTerminatedWaiterOptions) {
+		o.MaxDelay = 15 * time.Second
 	})
+	err = waiter.Wait(ctx, &ec2.DescribeInstancesInput{
+		InstanceIds: sortedInstanceIDs,
+	}, 10*time.Minute)
 	if err != nil {
 		return xerrors.Errorf("failed to terminate the instances: %w", err)
 	}
 
-	return asg.reload()
+	return asg.reload(ctx)
 }
 
-func (asg *AutoScalingGroup) restoreState() error {
+func (asg *AutoScalingGroup) restoreState(ctx context.Context) error {
 	if *asg.DesiredCapacity != *asg.OriginalDesiredCapacity {
 		return xerrors.Errorf("can't restore the state unless the desired capacity is %d", *asg.OriginalDesiredCapacity)
 	}
 
 	log.Printf("Update the auto scaling group \"%s\": MaxSize: %d\n", *asg.AutoScalingGroupName, *asg.OriginalMaxSize)
 
-	_, err := asg.asSvc.UpdateAutoScalingGroup(&autoscaling.UpdateAutoScalingGroupInput{
+	_, err := asg.asSvc.UpdateAutoScalingGroup(ctx, &autoscaling.UpdateAutoScalingGroupInput{
 		AutoScalingGroupName: asg.AutoScalingGroupName,
 		MaxSize:              asg.OriginalMaxSize,
 	})
@@ -256,8 +260,8 @@ func (asg *AutoScalingGroup) restoreState() error {
 		return xerrors.Errorf("failed to update the auto scaling group: %w", err)
 	}
 
-	_, err = asg.asSvc.DeleteTags(&autoscaling.DeleteTagsInput{
-		Tags: []*autoscaling.Tag{
+	_, err = asg.asSvc.DeleteTags(ctx, &autoscaling.DeleteTagsInput{
+		Tags: []autoscalingtypes.Tag{
 			asg.createTag("ecsmec:OriginalDesiredCapacity", fmt.Sprint(*asg.OriginalDesiredCapacity)),
 			asg.createTag("ecsmec:OriginalMaxSize", fmt.Sprint(*asg.OriginalMaxSize)),
 			asg.createTag("ecsmec:StateSavedAt", fmt.Sprint(asg.StateSavedAt.Format(time.RFC3339))),
@@ -267,10 +271,10 @@ func (asg *AutoScalingGroup) restoreState() error {
 		return xerrors.Errorf("failed to delete tags: %w", err)
 	}
 
-	return asg.reload()
+	return asg.reload(ctx)
 }
 
-func (asg *AutoScalingGroup) saveCurrentState() error {
+func (asg *AutoScalingGroup) saveCurrentState(ctx context.Context) error {
 	var stateSavedAt time.Time
 	if asg.StateSavedAt != nil {
 		stateSavedAt = *asg.StateSavedAt
@@ -278,8 +282,8 @@ func (asg *AutoScalingGroup) saveCurrentState() error {
 		stateSavedAt = time.Now().UTC()
 	}
 
-	_, err := asg.asSvc.CreateOrUpdateTags(&autoscaling.CreateOrUpdateTagsInput{
-		Tags: []*autoscaling.Tag{
+	_, err := asg.asSvc.CreateOrUpdateTags(ctx, &autoscaling.CreateOrUpdateTagsInput{
+		Tags: []autoscalingtypes.Tag{
 			asg.createTag("ecsmec:OriginalDesiredCapacity", fmt.Sprint(*asg.OriginalDesiredCapacity)),
 			asg.createTag("ecsmec:OriginalMaxSize", fmt.Sprint(*asg.OriginalMaxSize)),
 			asg.createTag("ecsmec:StateSavedAt", stateSavedAt.Format(time.RFC3339)),
@@ -292,8 +296,8 @@ func (asg *AutoScalingGroup) saveCurrentState() error {
 	return nil
 }
 
-func (asg *AutoScalingGroup) createTag(key string, value string) *autoscaling.Tag {
-	return &autoscaling.Tag{
+func (asg *AutoScalingGroup) createTag(key string, value string) autoscalingtypes.Tag {
+	return autoscalingtypes.Tag{
 		Key:               aws.String(key),
 		PropagateAtLaunch: aws.Bool(false),
 		ResourceId:        asg.AutoScalingGroupName,
@@ -302,7 +306,7 @@ func (asg *AutoScalingGroup) createTag(key string, value string) *autoscaling.Ta
 	}
 }
 
-func (asg *AutoScalingGroup) waitUntilInstancesInService(capacity int64) error {
+func (asg *AutoScalingGroup) waitUntilInstancesInService(ctx context.Context, capacity int32) error {
 	// WaitUntilGroupInService doesn't work even if the MinSize is equal to the DesiredCapacity
 	// (https://github.com/aws/aws-sdk-go/issues/2478),
 	// so wait manually
@@ -314,16 +318,16 @@ func (asg *AutoScalingGroup) waitUntilInstancesInService(capacity int64) error {
 	defer timer.Stop()
 
 	for {
-		resp, err := asg.asSvc.DescribeAutoScalingGroups(&autoscaling.DescribeAutoScalingGroupsInput{
-			AutoScalingGroupNames: []*string{asg.AutoScalingGroupName},
+		resp, err := asg.asSvc.DescribeAutoScalingGroups(ctx, &autoscaling.DescribeAutoScalingGroupsInput{
+			AutoScalingGroupNames: []string{*asg.AutoScalingGroupName},
 		})
 		if err != nil {
 			return xerrors.Errorf("failed to describe the auto scaling group: %w", err)
 		}
 
-		healthyInstanceCnt := int64(0)
+		healthyInstanceCnt := int32(0)
 		for _, i := range resp.AutoScalingGroups[0].Instances {
-			if *i.LifecycleState == "InService" {
+			if i.LifecycleState == "InService" {
 				healthyInstanceCnt++
 				if healthyInstanceCnt == capacity {
 					return nil
@@ -340,9 +344,9 @@ func (asg *AutoScalingGroup) waitUntilInstancesInService(capacity int64) error {
 	}
 }
 
-func (asg *AutoScalingGroup) fetchSortedInstanceIDs(count int64) ([]string, error) {
-	instances := make([]*ec2.Instance, 0, *asg.DesiredCapacity)
-	err := asg.fetchInstances(func(i *ec2.Instance) error {
+func (asg *AutoScalingGroup) fetchSortedInstanceIDs(ctx context.Context, count int32) ([]string, error) {
+	instances := make([]ec2types.Instance, 0, *asg.DesiredCapacity)
+	err := asg.fetchInstances(ctx, func(i ec2types.Instance) error {
 		instances = append(instances, i)
 		return nil
 	})
@@ -355,7 +359,7 @@ func (asg *AutoScalingGroup) fetchSortedInstanceIDs(count int64) ([]string, erro
 	})
 
 	azs := make([]string, 0)
-	azToInstances := make(map[string][]*ec2.Instance)
+	azToInstances := make(map[string][]ec2types.Instance)
 	azToOldInstanceCount := make(map[string]int)
 	for _, i := range instances {
 		az := *i.Placement.AvailabilityZone
@@ -380,10 +384,10 @@ func (asg *AutoScalingGroup) fetchSortedInstanceIDs(count int64) ([]string, erro
 Loop:
 	for {
 		for _, az := range azs {
-			if int64(len(sortedInstanceIDs)) == count {
+			if int32(len(sortedInstanceIDs)) == count {
 				break Loop
 			}
-			var i *ec2.Instance
+			var i ec2types.Instance
 			i, azToInstances[az] = azToInstances[az][0], azToInstances[az][1:]
 			sortedInstanceIDs = append(sortedInstanceIDs, *i.InstanceId)
 		}

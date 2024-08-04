@@ -1,35 +1,39 @@
 package capacity_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/autoscaling"
-	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/autoscaling"
+	autoscalingtypes "github.com/aws/aws-sdk-go-v2/service/autoscaling/types"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"go.uber.org/mock/gomock"
 
 	"github.com/abicky/ecsmec/internal/capacity"
 	"github.com/abicky/ecsmec/internal/const/autoscalingconst"
 	"github.com/abicky/ecsmec/internal/sliceutil"
-	"github.com/abicky/ecsmec/internal/testing/mocks"
+	"github.com/abicky/ecsmec/internal/testing/capacitymock"
 	"github.com/abicky/ecsmec/internal/testing/testutil"
 )
 
-func createReservation(instance *autoscaling.Instance, launchTime time.Time) *ec2.Reservation {
-	return createReservations([]*autoscaling.Instance{instance}, launchTime)[0]
+func createReservation(instance autoscalingtypes.Instance, launchTime time.Time) ec2types.Reservation {
+	return createReservations([]autoscalingtypes.Instance{instance}, launchTime)[0]
 }
 
-func createReservations(instances []*autoscaling.Instance, launchTime time.Time) []*ec2.Reservation {
-	reservations := make([]*ec2.Reservation, len(instances))
+func createReservations(instances []autoscalingtypes.Instance, launchTime time.Time) []ec2types.Reservation {
+	reservations := make([]ec2types.Reservation, len(instances))
 	for i, instance := range instances {
-		reservations[i] = &ec2.Reservation{
-			Instances: []*ec2.Instance{
+		reservations[i] = ec2types.Reservation{
+			Instances: []ec2types.Instance{
 				{
 					InstanceId: instance.InstanceId,
 					LaunchTime: aws.Time(launchTime),
-					Placement: &ec2.Placement{
+					Placement: &ec2types.Placement{
 						AvailabilityZone: instance.AvailabilityZone,
 					},
 				},
@@ -42,14 +46,15 @@ func createReservations(instances []*autoscaling.Instance, launchTime time.Time)
 
 func expectLaunchNewInstances(
 	t *testing.T,
-	asMock *mocks.MockAutoScalingAPI,
-	existingInstances, newInstances []*autoscaling.Instance,
-	desiredCapacity, maxSize int64,
+	ctx context.Context,
+	asMock *capacitymock.MockAutoScalingAPI,
+	existingInstances, newInstances []autoscalingtypes.Instance,
+	desiredCapacity, maxSize int32,
 	stateSavedAt string,
 ) *gomock.Call {
 	t.Helper()
 
-	newDesiredCapacity := desiredCapacity + int64(len(newInstances))
+	newDesiredCapacity := desiredCapacity + int32(len(newInstances))
 	expectedStateSavedAt, err := time.Parse(time.RFC3339, stateSavedAt)
 	if err != nil {
 		t.Fatalf("stateSavedAt is invalid format: %s", stateSavedAt)
@@ -63,19 +68,19 @@ func expectLaunchNewInstances(
 	}
 
 	return testutil.InOrder(
-		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-			AutoScalingGroups: []*autoscaling.Group{
+		asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+			AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 				{
 					AutoScalingGroupName: aws.String("autoscaling-group-name"),
-					AvailabilityZones:    aws.StringSlice(azs),
-					DesiredCapacity:      aws.Int64(desiredCapacity),
+					AvailabilityZones:    azs,
+					DesiredCapacity:      aws.Int32(desiredCapacity),
 					Instances:            existingInstances,
-					MaxSize:              aws.Int64(maxSize),
+					MaxSize:              aws.Int32(maxSize),
 				},
 			},
 		}, nil),
 
-		asMock.EXPECT().CreateOrUpdateTags(gomock.Any()).Do(func(input *autoscaling.CreateOrUpdateTagsInput) {
+		asMock.EXPECT().CreateOrUpdateTags(ctx, gomock.Any()).Do(func(_ context.Context, input *autoscaling.CreateOrUpdateTagsInput, _ ...func(*ecs.Options)) {
 			if len(input.Tags) != 3 {
 				t.Errorf("len(input.Tags) = %d; want %d", len(input.Tags), 3)
 			}
@@ -104,7 +109,7 @@ func expectLaunchNewInstances(
 			}
 		}),
 
-		asMock.EXPECT().UpdateAutoScalingGroup(gomock.Any()).Do(func(input *autoscaling.UpdateAutoScalingGroupInput) {
+		asMock.EXPECT().UpdateAutoScalingGroup(ctx, gomock.Any()).Do(func(_ context.Context, input *autoscaling.UpdateAutoScalingGroupInput, _ ...func(*autoscaling.Options)) {
 			if *input.DesiredCapacity != newDesiredCapacity {
 				t.Errorf("DesiredCapacity = %d; want %d", *input.DesiredCapacity, newDesiredCapacity)
 			}
@@ -114,14 +119,14 @@ func expectLaunchNewInstances(
 		}),
 
 		// For `waitUntilInstancesInService` and `reload` at the end of the method
-		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Times(2).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-			AutoScalingGroups: []*autoscaling.Group{
+		asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Times(2).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+			AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 				{
 					AutoScalingGroupName: aws.String("autoscaling-group-name"),
-					DesiredCapacity:      aws.Int64(newDesiredCapacity),
+					DesiredCapacity:      aws.Int32(newDesiredCapacity),
 					Instances:            append(existingInstances, newInstances...),
-					MaxSize:              aws.Int64(newDesiredCapacity),
-					Tags: []*autoscaling.TagDescription{
+					MaxSize:              aws.Int32(newDesiredCapacity),
+					Tags: []autoscalingtypes.TagDescription{
 						{
 							Key:   aws.String("ecsmec:OriginalDesiredCapacity"),
 							Value: aws.String(fmt.Sprint(desiredCapacity)),
@@ -143,54 +148,78 @@ func expectLaunchNewInstances(
 
 func expectTerminateInstances(
 	t *testing.T,
-	asMock *mocks.MockAutoScalingAPI,
-	ec2Mock *mocks.MockEC2API,
-	drainerMock *mocks.MockDrainer,
-	instancesToTerminate, instancesToKeep []*autoscaling.Instance,
-	reservationsToTerminate, reservationsToKeep []*ec2.Reservation,
-	desiredCapacity, maxSize int64,
+	ctx context.Context,
+	asMock *capacitymock.MockAutoScalingAPI,
+	ec2Mock *capacitymock.MockEC2API,
+	drainerMock *capacitymock.MockDrainer,
+	instancesToTerminate, instancesToKeep []autoscalingtypes.Instance,
+	reservationsToTerminate, reservationsToKeep []ec2types.Reservation,
+	desiredCapacity, maxSize int32,
 ) *gomock.Call {
 	t.Helper()
 
 	return testutil.InOrder(
-		ec2Mock.EXPECT().DescribeInstances(gomock.Any()).Return(&ec2.DescribeInstancesOutput{
+		ec2Mock.EXPECT().DescribeInstances(ctx, gomock.Any()).Return(&ec2.DescribeInstancesOutput{
 			Reservations: append(reservationsToTerminate, reservationsToKeep...),
 		}, nil),
 
-		drainerMock.EXPECT().Drain(gomock.Len(len(instancesToTerminate))),
+		drainerMock.EXPECT().Drain(ctx, gomock.Len(len(instancesToTerminate))),
 
-		asMock.EXPECT().DetachInstances(gomock.Any()).Do(func(input *autoscaling.DetachInstancesInput) {
+		asMock.EXPECT().DetachInstances(ctx, gomock.Any()).Do(func(_ context.Context, input *autoscaling.DetachInstancesInput, _ ...func(*autoscaling.Options)) {
 			want := make([]string, len(instancesToTerminate))
 			for i, instance := range instancesToTerminate {
 				want[i] = *instance.InstanceId
 			}
-			got := aws.StringValueSlice(input.InstanceIds)
-			if !testutil.MatchSlice(want, got) {
-				t.Errorf("input.InstanceIds = %v; want %v", got, want)
+			if !testutil.MatchSlice(want, input.InstanceIds) {
+				t.Errorf("input.InstanceIds = %v; want %v", input.InstanceIds, want)
 			}
 		}),
 
-		ec2Mock.EXPECT().TerminateInstances(gomock.Any()).Do(func(input *ec2.TerminateInstancesInput) {
+		ec2Mock.EXPECT().TerminateInstances(ctx, gomock.Any()).Do(func(_ context.Context, input *ec2.TerminateInstancesInput, _ ...func(options *ec2.Options)) {
 			want := make([]string, len(instancesToTerminate))
 			for i, instance := range instancesToTerminate {
 				want[i] = *instance.InstanceId
 			}
-			got := aws.StringValueSlice(input.InstanceIds)
-			if !testutil.MatchSlice(want, got) {
-				t.Errorf("input.InstanceIds = %v; want %v", got, want)
+			if !testutil.MatchSlice(want, input.InstanceIds) {
+				t.Errorf("input.InstanceIds = %v; want %v", input.InstanceIds, want)
 			}
 		}),
 
-		ec2Mock.EXPECT().WaitUntilInstanceTerminated(gomock.Any()),
+		// For InstanceTerminatedWaiter
+		ec2Mock.EXPECT().DescribeInstances(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+			instanceIds := make([]string, len(instancesToTerminate))
+			instances := make([]ec2types.Instance, len(instancesToTerminate))
+			for i, instance := range instancesToTerminate {
+				instanceIds[i] = *instance.InstanceId
+				instances[i] = ec2types.Instance{
+					InstanceId: instance.InstanceId,
+					State: &ec2types.InstanceState{
+						Name: "terminated",
+					},
+				}
+			}
+
+			if !testutil.MatchSlice(input.InstanceIds, instanceIds) {
+				t.Errorf("input.InstanceIds = %v; want %v", input.InstanceIds, instanceIds)
+			}
+
+			return &ec2.DescribeInstancesOutput{
+				Reservations: []ec2types.Reservation{
+					{
+						Instances: instances,
+					},
+				},
+			}, nil
+		}),
 
 		// Call `reload` at the end of the method
-		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-			AutoScalingGroups: []*autoscaling.Group{
+		asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+			AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 				{
 					AutoScalingGroupName: aws.String("autoscaling-group-name"),
-					DesiredCapacity:      aws.Int64(desiredCapacity),
+					DesiredCapacity:      aws.Int32(desiredCapacity),
 					Instances:            instancesToKeep,
-					MaxSize:              aws.Int64(maxSize),
+					MaxSize:              aws.Int32(maxSize),
 				},
 			},
 		}, nil),
@@ -199,14 +228,15 @@ func expectTerminateInstances(
 
 func expectRestoreState(
 	t *testing.T,
-	asMock *mocks.MockAutoScalingAPI,
-	desiredCapacity, maxSize int64,
+	ctx context.Context,
+	asMock *capacitymock.MockAutoScalingAPI,
+	desiredCapacity, maxSize int32,
 	stateSavedAt string,
 ) *gomock.Call {
 	t.Helper()
 
 	return testutil.InOrder(
-		asMock.EXPECT().UpdateAutoScalingGroup(gomock.Any()).Do(func(input *autoscaling.UpdateAutoScalingGroupInput) {
+		asMock.EXPECT().UpdateAutoScalingGroup(ctx, gomock.Any()).Do(func(_ context.Context, input *autoscaling.UpdateAutoScalingGroupInput, _ ...func(*autoscaling.Options)) {
 			if input.DesiredCapacity != nil {
 				t.Errorf("DesiredCapacity = %d; want nil", *input.DesiredCapacity)
 			}
@@ -215,7 +245,7 @@ func expectRestoreState(
 			}
 		}),
 
-		asMock.EXPECT().DeleteTags(gomock.Any()).Do(func(input *autoscaling.DeleteTagsInput) {
+		asMock.EXPECT().DeleteTags(ctx, gomock.Any()).Do(func(_ context.Context, input *autoscaling.DeleteTagsInput, _ ...func(*autoscaling.Options)) {
 			if len(input.Tags) != 3 {
 				t.Errorf("len(input.Tags) = %d; want %d", len(input.Tags), 3)
 			}
@@ -240,12 +270,12 @@ func expectRestoreState(
 		}),
 
 		// Call `reload` at the end of the method
-		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-			AutoScalingGroups: []*autoscaling.Group{
+		asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+			AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 				{
 					AutoScalingGroupName: aws.String("autoscaling-group-name"),
-					DesiredCapacity:      aws.Int64(desiredCapacity),
-					MaxSize:              aws.Int64(maxSize),
+					DesiredCapacity:      aws.Int32(desiredCapacity),
+					MaxSize:              aws.Int32(maxSize),
 				},
 			},
 		}, nil),
@@ -257,17 +287,17 @@ func TestNewAutoScalingGroup(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		desiredCapacity := int64(5)
-		maxSize := int64(10)
+		desiredCapacity := int32(5)
+		maxSize := int32(10)
 
-		asMock := mocks.NewMockAutoScalingAPI(ctrl)
-		ec2Mock := mocks.NewMockEC2API(ctrl)
+		asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
+		ec2Mock := capacitymock.NewMockEC2API(ctrl)
 
-		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-			AutoScalingGroups: []*autoscaling.Group{
+		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any(), gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+			AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 				{
-					DesiredCapacity: aws.Int64(desiredCapacity),
-					MaxSize:         aws.Int64(maxSize),
+					DesiredCapacity: aws.Int32(desiredCapacity),
+					MaxSize:         aws.Int32(maxSize),
 				},
 			},
 		}, nil)
@@ -292,20 +322,20 @@ func TestNewAutoScalingGroup(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		desiredCapacity := int64(5)
-		maxSize := int64(8)
+		desiredCapacity := int32(5)
+		maxSize := int32(8)
 		increasedDesiredCapacity := desiredCapacity * 2
 		stateSavedAt := time.Now().UTC().Truncate(time.Second)
 
-		asMock := mocks.NewMockAutoScalingAPI(ctrl)
-		ec2Mock := mocks.NewMockEC2API(ctrl)
+		asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
+		ec2Mock := capacitymock.NewMockEC2API(ctrl)
 
-		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-			AutoScalingGroups: []*autoscaling.Group{
+		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any(), gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+			AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 				{
-					DesiredCapacity: aws.Int64(increasedDesiredCapacity),
-					MaxSize:         aws.Int64(increasedDesiredCapacity),
-					Tags: []*autoscaling.TagDescription{
+					DesiredCapacity: aws.Int32(increasedDesiredCapacity),
+					MaxSize:         aws.Int32(increasedDesiredCapacity),
+					Tags: []autoscalingtypes.TagDescription{
 						{
 							Key:   aws.String("ecsmec:OriginalDesiredCapacity"),
 							Value: aws.String(fmt.Sprint(desiredCapacity)),
@@ -343,10 +373,10 @@ func TestNewAutoScalingGroup(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		asMock := mocks.NewMockAutoScalingAPI(ctrl)
-		ec2Mock := mocks.NewMockEC2API(ctrl)
+		asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
+		ec2Mock := capacitymock.NewMockEC2API(ctrl)
 
-		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any(), gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
 			AutoScalingGroups: nil,
 		}, nil)
 
@@ -361,10 +391,10 @@ func TestNewAutoScalingGroup(t *testing.T) {
 func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 	tests := []struct {
 		name            string
-		desiredCapacity int64
-		maxSize         int64
-		oldInstances    []*autoscaling.Instance
-		newInstances    []*autoscaling.Instance
+		desiredCapacity int32
+		maxSize         int32
+		oldInstances    []autoscalingtypes.Instance
+		newInstances    []autoscalingtypes.Instance
 	}{
 		{
 			name:            "the desired capacity is a multiple of the number of availability zones",
@@ -399,9 +429,11 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			asMock := mocks.NewMockAutoScalingAPI(ctrl)
-			ec2Mock := mocks.NewMockEC2API(ctrl)
-			drainerMock := mocks.NewMockDrainer(ctrl)
+			ctx := context.Background()
+
+			asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
+			ec2Mock := capacitymock.NewMockEC2API(ctrl)
+			drainerMock := capacitymock.NewMockDrainer(ctrl)
 
 			now := time.Now().UTC()
 			stateSavedAt := now.Format(time.RFC3339)
@@ -410,28 +442,28 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			newReservations := createReservations(tt.newInstances, now)
 
 			gomock.InOrder(
-				asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-					AutoScalingGroups: []*autoscaling.Group{
+				asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+					AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 						{
 							AutoScalingGroupName: aws.String("autoscaling-group-name"),
-							AvailabilityZones: []*string{
-								aws.String("ap-northeast-1a"),
-								aws.String("ap-northeast-1c"),
+							AvailabilityZones: []string{
+								"ap-northeast-1a",
+								"ap-northeast-1c",
 							},
-							DesiredCapacity: aws.Int64(tt.desiredCapacity),
+							DesiredCapacity: aws.Int32(tt.desiredCapacity),
 							Instances:       tt.oldInstances,
-							MaxSize:         aws.Int64(tt.maxSize),
+							MaxSize:         aws.Int32(tt.maxSize),
 						},
 					},
 				}, nil),
 
-				ec2Mock.EXPECT().DescribeInstances(gomock.Any()).Return(&ec2.DescribeInstancesOutput{
+				ec2Mock.EXPECT().DescribeInstances(ctx, gomock.Any()).Return(&ec2.DescribeInstancesOutput{
 					Reservations: oldReservations,
 				}, nil),
 
-				expectLaunchNewInstances(t, asMock, tt.oldInstances, tt.newInstances, tt.desiredCapacity, tt.maxSize, stateSavedAt),
-				expectTerminateInstances(t, asMock, ec2Mock, drainerMock, tt.oldInstances, tt.newInstances, oldReservations, newReservations, tt.desiredCapacity, tt.maxSize),
-				expectRestoreState(t, asMock, tt.desiredCapacity, tt.maxSize, stateSavedAt),
+				expectLaunchNewInstances(t, ctx, asMock, tt.oldInstances, tt.newInstances, tt.desiredCapacity, tt.maxSize, stateSavedAt),
+				expectTerminateInstances(t, ctx, asMock, ec2Mock, drainerMock, tt.oldInstances, tt.newInstances, oldReservations, newReservations, tt.desiredCapacity, tt.maxSize),
+				expectRestoreState(t, ctx, asMock, tt.desiredCapacity, tt.maxSize, stateSavedAt),
 			)
 
 			group, err := capacity.NewAutoScalingGroup("autoscaling-group-name", asMock, ec2Mock)
@@ -439,7 +471,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := group.ReplaceInstances(drainerMock); err != nil {
+			if err := group.ReplaceInstances(ctx, drainerMock); err != nil {
 				t.Errorf("err = %#v; want nil", err)
 			}
 		})
@@ -449,12 +481,14 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		desiredCapacity := int64(5)
-		maxSize := int64(8)
+		ctx := context.Background()
 
-		asMock := mocks.NewMockAutoScalingAPI(ctrl)
-		ec2Mock := mocks.NewMockEC2API(ctrl)
-		drainerMock := mocks.NewMockDrainer(ctrl)
+		desiredCapacity := int32(5)
+		maxSize := int32(8)
+
+		asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
+		ec2Mock := capacitymock.NewMockEC2API(ctrl)
+		drainerMock := capacitymock.NewMockDrainer(ctrl)
 
 		now := time.Now().UTC()
 		stateSavedAt := now.Format(time.RFC3339)
@@ -486,29 +520,29 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		)
 
 		gomock.InOrder(
-			asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-				AutoScalingGroups: []*autoscaling.Group{
+			asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+				AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 					{
 						AutoScalingGroupName: aws.String("autoscaling-group-name"),
-						AvailabilityZones: []*string{
-							aws.String("ap-northeast-1a"),
-							aws.String("ap-northeast-1c"),
-							aws.String("ap-northeast-1d"),
+						AvailabilityZones: []string{
+							"ap-northeast-1a",
+							"ap-northeast-1c",
+							"ap-northeast-1d",
 						},
-						DesiredCapacity: aws.Int64(desiredCapacity),
+						DesiredCapacity: aws.Int32(desiredCapacity),
 						Instances:       oldInstances,
-						MaxSize:         aws.Int64(maxSize),
+						MaxSize:         aws.Int32(maxSize),
 					},
 				},
 			}, nil),
 
-			ec2Mock.EXPECT().DescribeInstances(gomock.Any()).Return(&ec2.DescribeInstancesOutput{
+			ec2Mock.EXPECT().DescribeInstances(ctx, gomock.Any()).Return(&ec2.DescribeInstancesOutput{
 				Reservations: oldReservations,
 			}, nil),
 
-			expectLaunchNewInstances(t, asMock, oldInstances, newInstances, desiredCapacity, maxSize, stateSavedAt),
-			expectTerminateInstances(t, asMock, ec2Mock, drainerMock, instancesToTerminate, instancesToKeep, reservationsToTerminate, reservationsToKeep, desiredCapacity, maxSize),
-			expectRestoreState(t, asMock, desiredCapacity, maxSize, stateSavedAt),
+			expectLaunchNewInstances(t, ctx, asMock, oldInstances, newInstances, desiredCapacity, maxSize, stateSavedAt),
+			expectTerminateInstances(t, ctx, asMock, ec2Mock, drainerMock, instancesToTerminate, instancesToKeep, reservationsToTerminate, reservationsToKeep, desiredCapacity, maxSize),
+			expectRestoreState(t, ctx, asMock, desiredCapacity, maxSize, stateSavedAt),
 		)
 
 		group, err := capacity.NewAutoScalingGroup("autoscaling-group-name", asMock, ec2Mock)
@@ -516,7 +550,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := group.ReplaceInstances(drainerMock); err != nil {
+		if err := group.ReplaceInstances(ctx, drainerMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -525,12 +559,14 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		desiredCapacity := int64(6)
-		maxSize := int64(8)
+		ctx := context.Background()
 
-		asMock := mocks.NewMockAutoScalingAPI(ctrl)
-		ec2Mock := mocks.NewMockEC2API(ctrl)
-		drainerMock := mocks.NewMockDrainer(ctrl)
+		desiredCapacity := int32(6)
+		maxSize := int32(8)
+
+		asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
+		ec2Mock := capacitymock.NewMockEC2API(ctrl)
+		drainerMock := capacitymock.NewMockDrainer(ctrl)
 
 		now := time.Now().UTC()
 		stateSavedAt := now.Format(time.RFC3339)
@@ -541,18 +577,18 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		)
 
 		gomock.InOrder(
-			asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-				AutoScalingGroups: []*autoscaling.Group{
+			asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+				AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 					{
 						AutoScalingGroupName: aws.String("autoscaling-group-name"),
-						AvailabilityZones: []*string{
-							aws.String("ap-northeast-1a"),
-							aws.String("ap-northeast-1c"),
+						AvailabilityZones: []string{
+							"ap-northeast-1a",
+							"ap-northeast-1c",
 						},
-						DesiredCapacity: aws.Int64(desiredCapacity),
+						DesiredCapacity: aws.Int32(desiredCapacity),
 						Instances:       instances,
-						MaxSize:         aws.Int64(maxSize),
-						Tags: []*autoscaling.TagDescription{
+						MaxSize:         aws.Int32(maxSize),
+						Tags: []autoscalingtypes.TagDescription{
 							{
 								Key:   aws.String("ecsmec:OriginalDesiredCapacity"),
 								Value: aws.String(fmt.Sprint(desiredCapacity)),
@@ -570,11 +606,11 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 				},
 			}, nil),
 
-			ec2Mock.EXPECT().DescribeInstances(gomock.Any()).Return(&ec2.DescribeInstancesOutput{
+			ec2Mock.EXPECT().DescribeInstances(ctx, gomock.Any()).Return(&ec2.DescribeInstancesOutput{
 				Reservations: createReservations(instances, now),
 			}, nil),
 
-			expectRestoreState(t, asMock, desiredCapacity, maxSize, stateSavedAt),
+			expectRestoreState(t, ctx, asMock, desiredCapacity, maxSize, stateSavedAt),
 		)
 
 		group, err := capacity.NewAutoScalingGroup("autoscaling-group-name", asMock, ec2Mock)
@@ -582,7 +618,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := group.ReplaceInstances(drainerMock); err != nil {
+		if err := group.ReplaceInstances(context.Background(), drainerMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -591,16 +627,18 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		desiredCapacity := int64(6)
-		maxSize := int64(8)
+		ctx := context.Background()
 
-		asMock := mocks.NewMockAutoScalingAPI(ctrl)
-		ec2Mock := mocks.NewMockEC2API(ctrl)
-		drainerMock := mocks.NewMockDrainer(ctrl)
+		desiredCapacity := int32(6)
+		maxSize := int32(8)
+
+		asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
+		ec2Mock := capacitymock.NewMockEC2API(ctrl)
+		drainerMock := capacitymock.NewMockDrainer(ctrl)
 
 		now := time.Now().UTC()
 		stateSavedAt := now.Format(time.RFC3339)
-		tags := []*autoscaling.TagDescription{
+		tags := []autoscalingtypes.TagDescription{
 			{
 				Key:   aws.String("ecsmec:OriginalDesiredCapacity"),
 				Value: aws.String(fmt.Sprint(desiredCapacity)),
@@ -628,28 +666,28 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		newReservations := createReservations(newInstances, now)
 
 		gomock.InOrder(
-			asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Times(2).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-				AutoScalingGroups: []*autoscaling.Group{
+			asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Times(2).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+				AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 					{
 						AutoScalingGroupName: aws.String("autoscaling-group-name"),
-						AvailabilityZones: []*string{
-							aws.String("ap-northeast-1a"),
-							aws.String("ap-northeast-1c"),
+						AvailabilityZones: []string{
+							"ap-northeast-1a",
+							"ap-northeast-1c",
 						},
-						DesiredCapacity: aws.Int64(int64(len(oldInstances) + len(newInstances))),
+						DesiredCapacity: aws.Int32(int32(len(oldInstances) + len(newInstances))),
 						Instances:       append(oldInstances, newInstances...),
-						MaxSize:         aws.Int64(int64(len(oldInstances) + len(newInstances))),
+						MaxSize:         aws.Int32(int32(len(oldInstances) + len(newInstances))),
 						Tags:            tags,
 					},
 				},
 			}, nil),
 
-			ec2Mock.EXPECT().DescribeInstances(gomock.Any()).Return(&ec2.DescribeInstancesOutput{
+			ec2Mock.EXPECT().DescribeInstances(ctx, gomock.Any()).Return(&ec2.DescribeInstancesOutput{
 				Reservations: oldReservations,
 			}, nil),
 
-			expectTerminateInstances(t, asMock, ec2Mock, drainerMock, oldInstances, newInstances, oldReservations, newReservations, desiredCapacity, maxSize),
-			expectRestoreState(t, asMock, desiredCapacity, maxSize, stateSavedAt),
+			expectTerminateInstances(t, ctx, asMock, ec2Mock, drainerMock, oldInstances, newInstances, oldReservations, newReservations, desiredCapacity, maxSize),
+			expectRestoreState(t, ctx, asMock, desiredCapacity, maxSize, stateSavedAt),
 		)
 
 		group, err := capacity.NewAutoScalingGroup("autoscaling-group-name", asMock, ec2Mock)
@@ -657,7 +695,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := group.ReplaceInstances(drainerMock); err != nil {
+		if err := group.ReplaceInstances(ctx, drainerMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -667,9 +705,11 @@ func TestAutoScalingGroup_ReduceCapacity(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	asMock := mocks.NewMockAutoScalingAPI(ctrl)
-	ec2Mock := mocks.NewMockEC2API(ctrl)
-	drainerMock := mocks.NewMockDrainer(ctrl)
+	ctx := context.Background()
+
+	asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
+	ec2Mock := capacitymock.NewMockEC2API(ctrl)
+	drainerMock := capacitymock.NewMockDrainer(ctrl)
 
 	now := time.Now().UTC()
 
@@ -696,41 +736,64 @@ func TestAutoScalingGroup_ReduceCapacity(t *testing.T) {
 	terminatedInstanceIds := make([]string, 0, len(instancesToTerminate))
 
 	gomock.InOrder(
-		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-			AutoScalingGroups: []*autoscaling.Group{
+		asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+			AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 				{
 					AutoScalingGroupName: aws.String("autoscaling-group-name"),
-					DesiredCapacity:      aws.Int64(int64(len(allInstances))),
+					DesiredCapacity:      aws.Int32(int32(len(allInstances))),
 					Instances:            allInstances,
-					MaxSize:              aws.Int64(int64(len(allInstances))),
+					MaxSize:              aws.Int32(int32(len(allInstances))),
 				},
 			},
 		}, nil),
 
-		ec2Mock.EXPECT().DescribeInstances(gomock.Any()).Return(&ec2.DescribeInstancesOutput{
+		ec2Mock.EXPECT().DescribeInstances(ctx, gomock.Any()).Return(&ec2.DescribeInstancesOutput{
 			Reservations: append(reservationsToTerminate, reservationsToKeep...),
 		}, nil),
 
-		drainerMock.EXPECT().Drain(gomock.Len(len(instancesToTerminate))),
+		drainerMock.EXPECT().Drain(context.Background(), gomock.Len(len(instancesToTerminate))),
 
-		asMock.EXPECT().DetachInstances(gomock.Any()).Times(4).Do(func(input *autoscaling.DetachInstancesInput) {
-			detachedInstanceIds = append(detachedInstanceIds, aws.StringValueSlice(input.InstanceIds)...)
+		asMock.EXPECT().DetachInstances(ctx, gomock.Any()).Times(4).Do(func(_ context.Context, input *autoscaling.DetachInstancesInput, _ ...func(options *autoscaling.Options)) {
+			detachedInstanceIds = append(detachedInstanceIds, input.InstanceIds...)
 		}),
 
-		ec2Mock.EXPECT().TerminateInstances(gomock.Any()).Do(func(input *ec2.TerminateInstancesInput) {
-			terminatedInstanceIds = append(terminatedInstanceIds, aws.StringValueSlice(input.InstanceIds)...)
+		ec2Mock.EXPECT().TerminateInstances(ctx, gomock.Any()).Do(func(_ context.Context, input *ec2.TerminateInstancesInput, _ ...func(*ec2.Options)) {
+			terminatedInstanceIds = append(terminatedInstanceIds, input.InstanceIds...)
 		}),
 
-		ec2Mock.EXPECT().WaitUntilInstanceTerminated(gomock.Any()),
+		// For InstanceTerminatedWaiter
+		ec2Mock.EXPECT().DescribeInstances(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+			if !testutil.MatchSlice(input.InstanceIds, terminatedInstanceIds) {
+				t.Errorf("input.InstanceIds = %v; want %v", input.InstanceIds, terminatedInstanceIds)
+			}
+
+			instances := make([]ec2types.Instance, len(terminatedInstanceIds))
+			for i, id := range terminatedInstanceIds {
+				instances[i] = ec2types.Instance{
+					InstanceId: aws.String(id),
+					State: &ec2types.InstanceState{
+						Name: "terminated",
+					},
+				}
+			}
+
+			return &ec2.DescribeInstancesOutput{
+				Reservations: []ec2types.Reservation{
+					{
+						Instances: instances,
+					},
+				},
+			}, nil
+		}),
 
 		// Call `reload` at the end of the method
-		asMock.EXPECT().DescribeAutoScalingGroups(gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-			AutoScalingGroups: []*autoscaling.Group{
+		asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+			AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
 				{
 					AutoScalingGroupName: aws.String("autoscaling-group-name"),
-					DesiredCapacity:      aws.Int64(int64(len(instancesToKeep))),
+					DesiredCapacity:      aws.Int32(int32(len(instancesToKeep))),
 					Instances:            instancesToKeep,
-					MaxSize:              aws.Int64(int64(len(allInstances))),
+					MaxSize:              aws.Int32(int32(len(allInstances))),
 				},
 			},
 		}, nil),
@@ -741,7 +804,7 @@ func TestAutoScalingGroup_ReduceCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := group.ReduceCapacity(int64(len(instancesToTerminate)), drainerMock); err != nil {
+	if err := group.ReduceCapacity(ctx, int32(len(instancesToTerminate)), drainerMock); err != nil {
 		t.Errorf("err = %#v; want nil", err)
 	}
 

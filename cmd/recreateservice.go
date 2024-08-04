@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/spf13/cobra"
 
 	"github.com/abicky/ecsmec/internal/service"
@@ -64,12 +64,12 @@ func recreateService(cmd *cobra.Command, args []string) error {
 		return newRuntimeError("failed to parse \"overrides\": %w", err)
 	}
 
-	sess, err := newSession()
+	cfg, err := newConfig(cmd.Context())
 	if err != nil {
 		return newRuntimeError("failed to initialize a session: %w", err)
 	}
 
-	if err := service.NewService(ecs.New(sess)).Recreate(cluster, serviceName, overrideDef); err != nil {
+	if err := service.NewService(ecs.NewFromConfig(cfg)).Recreate(cmd.Context(), cluster, serviceName, overrideDef); err != nil {
 		return newRuntimeError("failed to recreate the service: %w", err)
 	}
 	return nil
