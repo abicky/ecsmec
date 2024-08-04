@@ -9,7 +9,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ecs"
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 
 	"github.com/abicky/ecsmec/internal/service"
 	"github.com/abicky/ecsmec/internal/testing/mocks"

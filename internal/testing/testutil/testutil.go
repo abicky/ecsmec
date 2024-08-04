@@ -1,11 +1,15 @@
 package testutil
 
 import (
-	"github.com/golang/mock/gomock"
+	"go.uber.org/mock/gomock"
 )
 
 func InOrder(calls ...*gomock.Call) *gomock.Call {
-	gomock.InOrder(calls...)
+	args := make([]any, 0, len(calls))
+	for _, call := range calls {
+		args = append(args, call)
+	}
+	gomock.InOrder(args...)
 	return calls[len(calls)-1]
 }
 
