@@ -1,16 +1,16 @@
 package sliceutil
 
-func Contains(slice []string, str string) bool {
+func Contains[T comparable](slice []T, v T) bool {
 	for _, elem := range slice {
-		if elem == str {
+		if elem == v {
 			return true
 		}
 	}
 	return false
 }
 
-func ChunkSlice(slice []*string, size int) chan []*string {
-	ch := make(chan []*string)
+func ChunkSlice[T any](slice []T, size int) chan []T {
+	ch := make(chan []T)
 	go func() {
 		for i := 0; i < len(slice); i += size {
 			end := i + size
