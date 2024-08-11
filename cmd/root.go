@@ -32,7 +32,7 @@ func (e *runtimeError) Error() string {
 	return fmt.Sprintf("%+v", e.err)
 }
 
-func newRuntimeError(format string, a ...interface{}) error {
+func newRuntimeError(format string, a ...any) error {
 	return &runtimeError{
 		err: xerrors.Errorf(format, a...),
 	}
