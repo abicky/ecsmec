@@ -39,6 +39,8 @@ that belong to the auto scaling group or spot fleet request.`,
 
 	cmd.Flags().String("auto-scaling-group-name", "", "The name of the target `GROUP`")
 	cmd.Flags().String("spot-fleet-request-id", "", "The ID of the target `REQUEST`")
+	cmd.MarkFlagsOneRequired("auto-scaling-group-name", "spot-fleet-request-id")
+	cmd.MarkFlagsMutuallyExclusive("auto-scaling-group-name", "spot-fleet-request-id")
 
 	cmd.Flags().String("cluster", "default", "The name of the target `CLUSTER`")
 
@@ -54,9 +56,6 @@ func reduceClusterCapacity(cmd *cobra.Command, args []string) error {
 	cluster, _ := reduceClusterCapacityCmd.Flags().GetString("cluster")
 	amount, _ := reduceClusterCapacityCmd.Flags().GetInt32("amount")
 
-	if len(id) == 0 && len(name) == 0 {
-		return errors.New("\"spot-fleet-request-id\" or \"auto-scaling-group-name\" is required")
-	}
 	if amount <= 0 {
 		return errors.New("\"amount\" must be greater than 0")
 	}
