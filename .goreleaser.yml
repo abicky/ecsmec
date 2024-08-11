@@ -1,3 +1,5 @@
+version: 2
+
 before:
   hooks:
     - go mod download
@@ -24,18 +26,18 @@ archives:
         format: zip
     wrap_in_directory: true
 brews:
-  - tap:
+  - repository:
       owner: abicky
       name: homebrew-tools
     homepage: "https://github.com/abicky/ecsmec"
     description: "A CLI tool for Amazon ECS that provides some commands to execute bothersome operations"
-    folder: Formula
+    directory: Formula
     test: |
       system "#{bin}/ecsmec --version"
 checksum:
   name_template: 'checksums.txt'
 snapshot:
-  name_template: "{{ .Tag }}-next"
+  version_template: "{{ .Tag }}-next"
 changelog:
   sort: asc
   filters:

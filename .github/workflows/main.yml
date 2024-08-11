@@ -18,16 +18,10 @@ jobs:
           - macos-latest
           - windows-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - uses: actions/cache@v1
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
 
       - run: go install go.uber.org/mock/mockgen@latest
 
@@ -43,19 +37,19 @@ jobs:
     needs: test
     if: contains(github.ref, 'tags/v')
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Check the version
         run: grep -qr "version = \"$(git tag --points-at HEAD | sed 's/^v//')\"" cmd
 
       - run: git fetch --prune --unshallow
-      - uses: actions/setup-go@v1
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - uses: goreleaser/goreleaser-action@v1
+      - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: release --rm-dist
+          args: release --clean
         env:
           # Use a custom token instead of GITHUB_TOKEN for the homebrew tap
           GITHUB_TOKEN: ${{ secrets.GORELEASER_GITHUB_TOKEN }}
