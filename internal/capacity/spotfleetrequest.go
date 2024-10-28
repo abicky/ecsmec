@@ -83,7 +83,7 @@ func (sfr *SpotFleetRequest) ReduceCapacity(ctx context.Context, amount int32, d
 		return xerrors.Errorf("failed to calculate capacity per instance: %w", err)
 	}
 
-	drainedCount := int32(0)
+	drainedCount := &atomic.Int32{}
 	ctxForPoll, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -93,7 +93,7 @@ func (sfr *SpotFleetRequest) ReduceCapacity(ctx context.Context, amount int32, d
 			if err != nil {
 				return nil, xerrors.Errorf("failed to process interruptions: %w", err)
 			}
-			atomic.AddInt32(&drainedCount, int32(len(entries))*capacityPerInstance)
+			drainedCount.Add(int32(len(entries)) * capacityPerInstance)
 			return entries, nil
 		})
 	}()
@@ -114,7 +114,7 @@ func (sfr *SpotFleetRequest) ReduceCapacity(ctx context.Context, amount int32, d
 
 	log.Printf("Wait for instances to be drained")
 	for {
-		if atomic.LoadInt32(&drainedCount) > amount-capacityPerInstance {
+		if drainedCount.Load() > amount-capacityPerInstance {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
