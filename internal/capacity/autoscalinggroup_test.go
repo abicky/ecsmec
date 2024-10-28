@@ -3,6 +3,7 @@ package capacity_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 
 	"github.com/abicky/ecsmec/internal/capacity"
 	"github.com/abicky/ecsmec/internal/const/autoscalingconst"
-	"github.com/abicky/ecsmec/internal/sliceutil"
 	"github.com/abicky/ecsmec/internal/testing/capacitymock"
 	"github.com/abicky/ecsmec/internal/testing/testutil"
 )
@@ -62,7 +62,7 @@ func expectLaunchNewInstances(
 
 	azs := make([]string, 0)
 	for _, i := range existingInstances {
-		if !sliceutil.Contains(azs, *i.AvailabilityZone) {
+		if !slices.Contains(azs, *i.AvailabilityZone) {
 			azs = append(azs, *i.AvailabilityZone)
 		}
 	}

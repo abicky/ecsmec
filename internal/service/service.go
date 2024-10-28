@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log"
+	"slices"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -11,7 +12,6 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/abicky/ecsmec/internal/const/ecsconst"
-	"github.com/abicky/ecsmec/internal/sliceutil"
 )
 
 type Service struct {
@@ -147,7 +147,7 @@ func (s *Service) stopAndWaitUntilStopped(ctx context.Context, cluster string, s
 	waiter := ecs.NewTasksStoppedWaiter(s.ecsSvc, func(o *ecs.TasksStoppedWaiterOptions) {
 		o.MaxDelay = 6 * time.Second
 	})
-	for arns := range sliceutil.ChunkSlice(taskArns, ecsconst.MaxDescribableTasks) {
+	for arns := range slices.Chunk(taskArns, ecsconst.MaxDescribableTasks) {
 		err := waiter.Wait(ctx, &ecs.DescribeTasksInput{
 			Cluster: aws.String(cluster),
 			Tasks:   arns,

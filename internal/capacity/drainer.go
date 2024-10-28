@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/abicky/ecsmec/internal/const/ecsconst"
-	"github.com/abicky/ecsmec/internal/sliceutil"
 )
 
 type Drainer interface {
@@ -175,7 +175,7 @@ func (d *drainer) drainContainerInstances(ctx context.Context, arns []*string, w
 		}
 	}
 
-	for arns := range sliceutil.ChunkSlice(arns, ecsconst.MaxUpdatableContainerInstancesState) {
+	for arns := range slices.Chunk(arns, ecsconst.MaxUpdatableContainerInstancesState) {
 		_, err := d.ecsSvc.UpdateContainerInstancesState(ctx, &ecs.UpdateContainerInstancesStateInput{
 			Cluster:            aws.String(d.cluster),
 			ContainerInstances: aws.ToStringSlice(arns),
@@ -194,7 +194,7 @@ func (d *drainer) drainContainerInstances(ctx context.Context, arns []*string, w
 	tasksStoppedWaiter := ecs.NewTasksStoppedWaiter(d.ecsSvc, func(o *ecs.TasksStoppedWaiterOptions) {
 		o.MaxDelay = 6 * time.Second
 	})
-	for arns := range sliceutil.ChunkSlice(allTaskArns, ecsconst.MaxDescribableTasks) {
+	for arns := range slices.Chunk(allTaskArns, ecsconst.MaxDescribableTasks) {
 		err := tasksStoppedWaiter.Wait(ctx, &ecs.DescribeTasksInput{
 			Cluster: aws.String(d.cluster),
 			Tasks:   arns,
@@ -208,7 +208,7 @@ func (d *drainer) drainContainerInstances(ctx context.Context, arns []*string, w
 	servicesStableWaiter := ecs.NewServicesStableWaiter(d.ecsSvc, func(o *ecs.ServicesStableWaiterOptions) {
 		o.MaxDelay = 15 * time.Second
 	})
-	for names := range sliceutil.ChunkSlice(allServiceNames, ecsconst.MaxDescribableServices) {
+	for names := range slices.Chunk(allServiceNames, ecsconst.MaxDescribableServices) {
 		err := servicesStableWaiter.Wait(ctx, &ecs.DescribeServicesInput{
 			Cluster:  aws.String(d.cluster),
 			Services: names,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -16,7 +17,6 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/abicky/ecsmec/internal/const/autoscalingconst"
-	"github.com/abicky/ecsmec/internal/sliceutil"
 )
 
 type AutoScalingGroup struct {
@@ -212,7 +212,7 @@ func (asg *AutoScalingGroup) terminateInstances(ctx context.Context, count int32
 		return xerrors.Errorf("failed to drain instances: %w", err)
 	}
 
-	for ids := range sliceutil.ChunkSlice(sortedInstanceIDs, autoscalingconst.MaxDetachableInstances) {
+	for ids := range slices.Chunk(sortedInstanceIDs, autoscalingconst.MaxDetachableInstances) {
 		log.Println("Detach instances:", ids)
 		_, err := asg.asSvc.DetachInstances(ctx, &autoscaling.DetachInstancesInput{
 			AutoScalingGroupName:           asg.AutoScalingGroupName,
@@ -363,7 +363,7 @@ func (asg *AutoScalingGroup) fetchSortedInstanceIDs(ctx context.Context, count i
 	azToOldInstanceCount := make(map[string]int)
 	for _, i := range instances {
 		az := *i.Placement.AvailabilityZone
-		if !sliceutil.Contains(azs, az) {
+		if !slices.Contains(azs, az) {
 			azs = append(azs, az)
 		}
 		azToInstances[az] = append(azToInstances[az], i)
