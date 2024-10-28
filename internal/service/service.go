@@ -55,7 +55,7 @@ func (s *Service) Recreate(ctx context.Context, cluster string, serviceName stri
 func (s *Service) copy(ctx context.Context, cluster string, serviceName string, overrides Definition) error {
 	resp, err := s.ecsSvc.DescribeServices(ctx, &ecs.DescribeServicesInput{
 		Cluster:  aws.String(cluster),
-		Include:  []ecstypes.ServiceField{"TAGS"},
+		Include:  []ecstypes.ServiceField{ecstypes.ServiceFieldTags},
 		Services: []string{serviceName},
 	})
 	if err != nil {
@@ -122,7 +122,7 @@ func (s *Service) stopAndWaitUntilStopped(ctx context.Context, cluster string, s
 	taskArns := make([]string, 0)
 	params := &ecs.ListTasksInput{
 		Cluster:       aws.String(cluster),
-		DesiredStatus: "RUNNING",
+		DesiredStatus: ecstypes.DesiredStatusRunning,
 		ServiceName:   aws.String(serviceName),
 	}
 

@@ -66,7 +66,7 @@ func recreateService(cmd *cobra.Command, args []string) error {
 
 	cfg, err := newConfig(cmd.Context())
 	if err != nil {
-		return newRuntimeError("failed to initialize a session: %w", err)
+		return newRuntimeError("failed to initialize configuration: %w", err)
 	}
 
 	if err := service.NewService(ecs.NewFromConfig(cfg)).Recreate(cmd.Context(), cluster, serviceName, overrideDef); err != nil {
