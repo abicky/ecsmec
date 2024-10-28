@@ -1,6 +1,6 @@
 module github.com/abicky/ecsmec
 
-go 1.22.5
+go 1.23.2
 
 require (
 	dario.cat/mergo v1.0.1
