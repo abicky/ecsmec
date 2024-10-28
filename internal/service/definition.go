@@ -13,7 +13,7 @@ type Definition ecs.CreateServiceInput
 
 func NewDefinitionFromExistingService(s ecstypes.Service) *Definition {
 	propagateTags := s.PropagateTags
-	if propagateTags == "NONE" {
+	if propagateTags == ecstypes.PropagateTagsNone {
 		propagateTags = ""
 	}
 

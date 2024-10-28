@@ -21,7 +21,7 @@ func TestNewDefinitionFromExistingService(t *testing.T) {
 			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
 				DesiredCount:  1,
-				PropagateTags: "NONE",
+				PropagateTags: ecstypes.PropagateTagsNone,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"),
 			},
 			want: &service.Definition{
@@ -35,7 +35,7 @@ func TestNewDefinitionFromExistingService(t *testing.T) {
 			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
 				DesiredCount:  1,
-				PropagateTags: "NONE",
+				PropagateTags: ecstypes.PropagateTagsNone,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS2"),
 			},
 			want: &service.Definition{
@@ -49,13 +49,13 @@ func TestNewDefinitionFromExistingService(t *testing.T) {
 			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
 				DesiredCount:  1,
-				PropagateTags: "TASK_DEFINITION",
+				PropagateTags: ecstypes.PropagateTagsTaskDefinition,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"),
 			},
 			want: &service.Definition{
 				Cluster:       aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
 				DesiredCount:  aws.Int32(1),
-				PropagateTags: "TASK_DEFINITION",
+				PropagateTags: ecstypes.PropagateTagsTaskDefinition,
 				Role:          nil,
 			},
 		},
@@ -64,7 +64,7 @@ func TestNewDefinitionFromExistingService(t *testing.T) {
 			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
 				DesiredCount:  1,
-				PropagateTags: "NONE",
+				PropagateTags: ecstypes.PropagateTagsNone,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/CustomRole"),
 			},
 			want: &service.Definition{
