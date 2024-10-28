@@ -12,12 +12,12 @@ This tool enables you to do such operations easily.
 
 Download the binary archive from the [releases page](https://github.com/abicky/ecsmec/releases), unpack it, and move the executable "ecsmec" to a directory in your path (e.g. `/usr/local/bin`).
 
-For example, you can install the latest binary on macOS by the following commands:
+For example, you can install the latest binary on a Mac with Apple silicon by the following commands:
 
 ```
-curl -LO https://github.com/abicky/ecsmec/releases/latest/download/ecsmec_darwin_amd64.tar.gz
-tar xvf ecsmec_darwin_amd64.tar.gz
-mv ecsmec_darwin_amd64/ecsmec /usr/local/bin/
+curl -LO https://github.com/abicky/ecsmec/releases/latest/download/ecsmec_darwin_arm64.tar.gz
+tar xvf ecsmec_darwin_arm64.tar.gz
+mv ecsmec_darwin_arm64/ecsmec /usr/local/bin/
 ```
 
 If you download the archive via a browser on macOS Catalina or later, you may receive the message "“ecsmec” cannot be opened because the developer cannot be verified."
