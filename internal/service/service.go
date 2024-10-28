@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log"
 	"slices"
 	"time"
@@ -180,7 +181,7 @@ func retryOnServiceCreationTempErr(fn func() error, tries int) error {
 		}
 
 		var e *ecstypes.InvalidParameterException
-		if !xerrors.As(err, &e) || e.ErrorMessage() != "Unable to Start a service that is still Draining." {
+		if !errors.As(err, &e) || e.ErrorMessage() != "Unable to Start a service that is still Draining." {
 			break
 		}
 

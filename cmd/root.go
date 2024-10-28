@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -41,7 +42,7 @@ func newRuntimeError(format string, a ...any) error {
 func Execute() int {
 	if cmd, err := rootCmd.ExecuteC(); err != nil {
 		var rerr *runtimeError
-		if xerrors.As(err, &rerr) {
+		if errors.As(err, &rerr) {
 			rootCmd.Println("Error:", err)
 			return 1
 		}
