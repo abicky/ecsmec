@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"testing"
 
@@ -27,7 +27,7 @@ func createInstances(az string, size int) []autoscalingtypes.Instance {
 	for i := range size {
 		instances[i] = autoscalingtypes.Instance{
 			AvailabilityZone: aws.String(az),
-			InstanceId:       aws.String(fmt.Sprintf("i-%s%08x%08d", azChar, rand.Int31(), i)),
+			InstanceId:       aws.String(fmt.Sprintf("i-%s%08x%08d", azChar, rand.Uint32(), i)),
 			LifecycleState:   "InService",
 		}
 	}
