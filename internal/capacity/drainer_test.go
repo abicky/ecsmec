@@ -287,7 +287,7 @@ func TestDrainer_ProcessInterruptions(t *testing.T) {
 
 		entries, err := drainer.ProcessInterruptions(ctx, messages)
 		if err != nil {
-			t.Errorf("err = nil; want non-nil")
+			t.Errorf("err = %#v; want nil", err)
 		}
 		if len(entries) > 0 {
 			t.Errorf("len(entries) = %d; want %d", len(entries), 0)
@@ -307,7 +307,7 @@ func TestDrainer_ProcessInterruptions(t *testing.T) {
 
 		_, err = drainer.ProcessInterruptions(context.Background(), []sqstypes.Message{})
 		if err != nil {
-			t.Errorf("err = nil; want non-nil")
+			t.Errorf("err = %#v; want nil", err)
 		}
 	})
 }
