@@ -24,7 +24,7 @@ func createInstance(az string) autoscalingtypes.Instance {
 func createInstances(az string, size int) []autoscalingtypes.Instance {
 	azChar := az[len(az)-1:]
 	instances := make([]autoscalingtypes.Instance, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		instances[i] = autoscalingtypes.Instance{
 			AvailabilityZone: aws.String(az),
 			InstanceId:       aws.String(fmt.Sprintf("i-%s%08x%08d", azChar, rand.Int31(), i)),

@@ -20,7 +20,7 @@ func TestContains(t *testing.T) {
 func TestChunkSlice(t *testing.T) {
 	n := 7
 	strs := make([]*string, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		s := fmt.Sprint(i)
 		strs[i] = &s
 	}

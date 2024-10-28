@@ -174,7 +174,7 @@ func (s *Service) delete(ctx context.Context, cluster string, serviceName string
 
 func retryOnServiceCreationTempErr(fn func() error, tries int) error {
 	var err error
-	for i := 0; i < tries; i++ {
+	for i := range tries {
 		if err = fn(); err == nil {
 			break
 		}
