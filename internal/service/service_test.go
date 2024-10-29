@@ -67,7 +67,7 @@ func expectCopy(
 		}),
 
 		// For ecs.ServicesStableWaiter
-		ecsMock.EXPECT().DescribeServices(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, input *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
+		ecsMock.EXPECT().DescribeServices(testutil.AnyContext(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, input *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
 			if input.Services[0] != dstServiceName {
 				t.Errorf("*input.Service[0] = %s; want %s", input.Services[0], dstServiceName)
 			}
@@ -119,7 +119,7 @@ func expectStopAndDelete(
 		}),
 
 		// For ecs.TasksStoppedWaiter
-		ecsMock.EXPECT().DescribeTasks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
+		ecsMock.EXPECT().DescribeTasks(testutil.AnyContext(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
 			if !reflect.DeepEqual(input.Tasks, runningTaskArns) {
 				t.Errorf("input.Tasks = %#v; want %#v", input.Tasks, runningTaskArns)
 			}

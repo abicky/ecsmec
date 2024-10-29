@@ -1,8 +1,17 @@
 package testutil
 
 import (
+	"context"
+	"reflect"
+
 	"go.uber.org/mock/gomock"
 )
+
+var ctxIface = reflect.TypeOf((*context.Context)(nil)).Elem()
+
+func AnyContext() gomock.Matcher {
+	return gomock.AssignableToTypeOf(ctxIface)
+}
 
 func InOrder(calls ...*gomock.Call) *gomock.Call {
 	args := make([]any, 0, len(calls))

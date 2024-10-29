@@ -73,7 +73,7 @@ func TestSpotFleetRequest_TerminateAllInstances(t *testing.T) {
 			}),
 
 			// For InstanceTerminatedWaiter
-			ec2Mock.EXPECT().DescribeInstances(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+			ec2Mock.EXPECT().DescribeInstances(testutil.AnyContext(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 				instanceIds := make([]string, len(instances))
 				for i, instance := range instances {
 					instanceIds[i] = *instance.InstanceId

@@ -14,6 +14,7 @@ import (
 
 	"github.com/abicky/ecsmec/internal/capacity"
 	"github.com/abicky/ecsmec/internal/testing/capacitymock"
+	"github.com/abicky/ecsmec/internal/testing/testutil"
 )
 
 func TestDrainer_Drain(t *testing.T) {
@@ -87,7 +88,7 @@ func TestDrainer_Drain(t *testing.T) {
 
 		ecsMock.EXPECT().UpdateContainerInstancesState(ctx, gomock.Any()).Return(&ecs.UpdateContainerInstancesStateOutput{}, nil)
 		// For ecs.TasksStoppedWaiter
-		ecsMock.EXPECT().DescribeTasks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
+		ecsMock.EXPECT().DescribeTasks(testutil.AnyContext(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
 			return &ecs.DescribeTasksOutput{
 				Tasks: []ecstypes.Task{
 					{
@@ -97,7 +98,7 @@ func TestDrainer_Drain(t *testing.T) {
 			}, nil
 		})
 		// For ecs.ServicesStableWaiter
-		ecsMock.EXPECT().DescribeServices(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
+		ecsMock.EXPECT().DescribeServices(testutil.AnyContext(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
 			return &ecs.DescribeServicesOutput{
 				Services: []ecstypes.Service{
 					{
@@ -115,7 +116,7 @@ func TestDrainer_Drain(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := drainer.Drain(context.Background(), instanceIDs); err != nil {
+		if err := drainer.Drain(ctx, instanceIDs); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -147,7 +148,7 @@ func TestDrainer_Drain(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := drainer.Drain(context.Background(), instanceIDs); err == nil {
+		if err := drainer.Drain(ctx, instanceIDs); err == nil {
 			t.Errorf("err = nil; want non-nil")
 		}
 	})
@@ -245,7 +246,7 @@ func TestDrainer_ProcessInterruptions(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		entries, err := drainer.ProcessInterruptions(context.Background(), messages)
+		entries, err := drainer.ProcessInterruptions(ctx, messages)
 		if err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}

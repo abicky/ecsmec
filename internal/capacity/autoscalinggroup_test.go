@@ -186,7 +186,7 @@ func expectTerminateInstances(
 		}),
 
 		// For InstanceTerminatedWaiter
-		ec2Mock.EXPECT().DescribeInstances(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+		ec2Mock.EXPECT().DescribeInstances(testutil.AnyContext(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 			instanceIds := make([]string, len(instancesToTerminate))
 			instances := make([]ec2types.Instance, len(instancesToTerminate))
 			for i, instance := range instancesToTerminate {
@@ -618,7 +618,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := group.ReplaceInstances(context.Background(), drainerMock); err != nil {
+		if err := group.ReplaceInstances(ctx, drainerMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -751,7 +751,7 @@ func TestAutoScalingGroup_ReduceCapacity(t *testing.T) {
 			Reservations: append(reservationsToTerminate, reservationsToKeep...),
 		}, nil),
 
-		drainerMock.EXPECT().Drain(context.Background(), gomock.Len(len(instancesToTerminate))),
+		drainerMock.EXPECT().Drain(ctx, gomock.Len(len(instancesToTerminate))),
 
 		asMock.EXPECT().DetachInstances(ctx, gomock.Any()).Times(4).Do(func(_ context.Context, input *autoscaling.DetachInstancesInput, _ ...func(options *autoscaling.Options)) {
 			detachedInstanceIds = append(detachedInstanceIds, input.InstanceIds...)
@@ -762,7 +762,7 @@ func TestAutoScalingGroup_ReduceCapacity(t *testing.T) {
 		}),
 
 		// For InstanceTerminatedWaiter
-		ec2Mock.EXPECT().DescribeInstances(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+		ec2Mock.EXPECT().DescribeInstances(testutil.AnyContext(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
 			if !testutil.MatchSlice(input.InstanceIds, terminatedInstanceIds) {
 				t.Errorf("input.InstanceIds = %v; want %v", input.InstanceIds, terminatedInstanceIds)
 			}
