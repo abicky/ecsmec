@@ -33,6 +33,7 @@ func NewDefinitionFromExistingService(s ecstypes.Service) *Definition {
 		DeploymentController:          s.DeploymentController,
 		DesiredCount:                  aws.Int32(s.DesiredCount),
 		EnableECSManagedTags:          s.EnableECSManagedTags,
+		EnableExecuteCommand:          s.EnableExecuteCommand,
 		HealthCheckGracePeriodSeconds: s.HealthCheckGracePeriodSeconds,
 		LaunchType:                    s.LaunchType,
 		LoadBalancers:                 s.LoadBalancers,
@@ -44,9 +45,11 @@ func NewDefinitionFromExistingService(s ecstypes.Service) *Definition {
 		Role:                          roleArn,
 		SchedulingStrategy:            s.SchedulingStrategy,
 		ServiceName:                   s.ServiceName,
+		ServiceConnectConfiguration:   s.Deployments[0].ServiceConnectConfiguration,
 		ServiceRegistries:             s.ServiceRegistries,
 		Tags:                          s.Tags,
 		TaskDefinition:                s.TaskDefinition,
+		VolumeConfigurations:          s.Deployments[0].VolumeConfigurations,
 	}
 }
 

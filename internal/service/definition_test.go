@@ -20,6 +20,7 @@ func TestNewDefinitionFromExistingService(t *testing.T) {
 			name: "default",
 			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
+				Deployments:   make([]ecstypes.Deployment, 1),
 				DesiredCount:  1,
 				PropagateTags: ecstypes.PropagateTagsNone,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"),
@@ -34,6 +35,7 @@ func TestNewDefinitionFromExistingService(t *testing.T) {
 			name: "when the service linked role has a suffix",
 			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
+				Deployments:   make([]ecstypes.Deployment, 1),
 				DesiredCount:  1,
 				PropagateTags: ecstypes.PropagateTagsNone,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS2"),
@@ -48,6 +50,7 @@ func TestNewDefinitionFromExistingService(t *testing.T) {
 			name: "when PropagateTags is specified",
 			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
+				Deployments:   make([]ecstypes.Deployment, 1),
 				DesiredCount:  1,
 				PropagateTags: ecstypes.PropagateTagsTaskDefinition,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"),
@@ -63,6 +66,7 @@ func TestNewDefinitionFromExistingService(t *testing.T) {
 			name: "when Role is specified",
 			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
+				Deployments:   make([]ecstypes.Deployment, 1),
 				DesiredCount:  1,
 				PropagateTags: ecstypes.PropagateTagsNone,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/CustomRole"),

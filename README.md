@@ -141,6 +141,15 @@ You need the following permissions to execute the command:
       ],
       "Resource": [
         "arn:aws:ecs:<region>:<account-id>:service/<cluster>/*"
+      ],
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:PassRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::<account-id>:role/<role_for_volume_configurations>"
       ]
     }
   ]

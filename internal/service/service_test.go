@@ -43,6 +43,7 @@ func expectCopy(
 					{
 						ClusterArn:        aws.String(cluster),
 						ServiceName:       aws.String(srcServiceName),
+						Deployments:       make([]ecstypes.Deployment, 1),
 						DesiredCount:      desiredCount,
 						PlacementStrategy: srcStrategy,
 						Status:            aws.String("ACTIVE"),
