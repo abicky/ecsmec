@@ -345,6 +345,8 @@ func (asg *AutoScalingGroup) waitUntilInstancesInService(ctx context.Context, ca
 			continue
 		case <-timer.C:
 			return xerrors.Errorf("can't prepare at least %d in-service instances within %v", capacity, timeout)
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }

@@ -66,6 +66,8 @@ func (c *cluster) WaitUntilContainerInstancesRegistered(ctx context.Context, cou
 			continue
 		case <-timer.C:
 			return xerrors.Errorf("%d container instances expected to be registered but only %d instances were registered within %v", count, foundCount, timeout)
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }
