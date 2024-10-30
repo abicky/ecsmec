@@ -425,6 +425,8 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
 			ec2Mock := capacitymock.NewMockEC2API(ctrl)
 			drainerMock := capacitymock.NewMockDrainer(ctrl)
+			clusterMock := capacitymock.NewMockCluster(ctrl)
+			clusterMock.EXPECT().Name()
 
 			now := time.Now().UTC()
 			stateSavedAt := now.Format(time.RFC3339)
@@ -448,11 +450,13 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 					},
 				}, nil),
 
+				// For fetchInstances
 				ec2Mock.EXPECT().DescribeInstances(ctx, gomock.Any()).Return(&ec2.DescribeInstancesOutput{
 					Reservations: oldReservations,
 				}, nil),
 
 				expectLaunchNewInstances(t, ctx, asMock, tt.oldInstances, tt.newInstances, tt.desiredCapacity, tt.maxSize, stateSavedAt),
+				clusterMock.EXPECT().WaitUntilContainerInstancesRegistered(ctx, len(tt.newInstances), gomock.AssignableToTypeOf(&time.Time{})),
 				expectTerminateInstances(t, ctx, asMock, ec2Mock, drainerMock, tt.oldInstances, tt.newInstances, oldReservations, newReservations, tt.desiredCapacity, tt.maxSize),
 				expectRestoreState(t, ctx, asMock, tt.desiredCapacity, tt.maxSize, stateSavedAt),
 			)
@@ -462,7 +466,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := group.ReplaceInstances(ctx, drainerMock); err != nil {
+			if err := group.ReplaceInstances(ctx, drainerMock, clusterMock); err != nil {
 				t.Errorf("err = %#v; want nil", err)
 			}
 		})
@@ -480,6 +484,8 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
 		ec2Mock := capacitymock.NewMockEC2API(ctrl)
 		drainerMock := capacitymock.NewMockDrainer(ctrl)
+		clusterMock := capacitymock.NewMockCluster(ctrl)
+		clusterMock.EXPECT().Name()
 
 		now := time.Now().UTC()
 		stateSavedAt := now.Format(time.RFC3339)
@@ -527,11 +533,13 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 				},
 			}, nil),
 
+			// For fetchInstances
 			ec2Mock.EXPECT().DescribeInstances(ctx, gomock.Any()).Return(&ec2.DescribeInstancesOutput{
 				Reservations: oldReservations,
 			}, nil),
 
 			expectLaunchNewInstances(t, ctx, asMock, oldInstances, newInstances, desiredCapacity, maxSize, stateSavedAt),
+			clusterMock.EXPECT().WaitUntilContainerInstancesRegistered(ctx, len(newInstances), gomock.AssignableToTypeOf(&time.Time{})),
 			expectTerminateInstances(t, ctx, asMock, ec2Mock, drainerMock, instancesToTerminate, instancesToKeep, reservationsToTerminate, reservationsToKeep, desiredCapacity, maxSize),
 			expectRestoreState(t, ctx, asMock, desiredCapacity, maxSize, stateSavedAt),
 		)
@@ -541,12 +549,12 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := group.ReplaceInstances(ctx, drainerMock); err != nil {
+		if err := group.ReplaceInstances(ctx, drainerMock, clusterMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
 
-	t.Run("replacement is already finished", func(t *testing.T) {
+	t.Run("replacement has already finished", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
@@ -558,6 +566,8 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
 		ec2Mock := capacitymock.NewMockEC2API(ctrl)
 		drainerMock := capacitymock.NewMockDrainer(ctrl)
+		clusterMock := capacitymock.NewMockCluster(ctrl)
+		clusterMock.EXPECT().Name()
 
 		now := time.Now().UTC()
 		stateSavedAt := now.Format(time.RFC3339)
@@ -570,6 +580,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		gomock.InOrder(
 			asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
 				AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
+					// NOTE: If replacement has already finished, DesiredCapacity is equal to OriginalDesiredCapacity
 					{
 						AutoScalingGroupName: aws.String("autoscaling-group-name"),
 						AvailabilityZones: []string{
@@ -584,10 +595,12 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 				},
 			}, nil),
 
+			// For fetchInstances
 			ec2Mock.EXPECT().DescribeInstances(ctx, gomock.Any()).Return(&ec2.DescribeInstancesOutput{
 				Reservations: createReservations(instances, now),
 			}, nil),
 
+			clusterMock.EXPECT().WaitUntilContainerInstancesRegistered(ctx, 0, gomock.AssignableToTypeOf(&time.Time{})),
 			expectRestoreState(t, ctx, asMock, desiredCapacity, maxSize, stateSavedAt),
 		)
 
@@ -596,7 +609,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := group.ReplaceInstances(ctx, drainerMock); err != nil {
+		if err := group.ReplaceInstances(ctx, drainerMock, clusterMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
@@ -614,6 +627,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		ec2Mock := capacitymock.NewMockEC2API(ctrl)
 		drainerMock := capacitymock.NewMockDrainer(ctrl)
 		clusterMock := capacitymock.NewMockCluster(ctrl)
+		clusterMock.EXPECT().Name()
 
 		now := time.Now().UTC()
 		stateSavedAt := now.Format(time.RFC3339)
@@ -630,27 +644,34 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		)
 		newReservations := createReservations(newInstances, now)
 
+		asg := autoscalingtypes.AutoScalingGroup{
+			AutoScalingGroupName: aws.String("autoscaling-group-name"),
+			AvailabilityZones: []string{
+				"ap-northeast-1a",
+				"ap-northeast-1c",
+			},
+			DesiredCapacity: aws.Int32(int32(len(oldInstances) + len(newInstances))),
+			Instances:       append(oldInstances, newInstances...),
+			MaxSize:         aws.Int32(int32(len(oldInstances) + len(newInstances))),
+			Tags:            createTagDescriptions(desiredCapacity, maxSize, stateSavedAt),
+		}
+
 		gomock.InOrder(
-			asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Times(2).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
-				AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{
-					{
-						AutoScalingGroupName: aws.String("autoscaling-group-name"),
-						AvailabilityZones: []string{
-							"ap-northeast-1a",
-							"ap-northeast-1c",
-						},
-						DesiredCapacity: aws.Int32(int32(len(oldInstances) + len(newInstances))),
-						Instances:       append(oldInstances, newInstances...),
-						MaxSize:         aws.Int32(int32(len(oldInstances) + len(newInstances))),
-						Tags:            createTagDescriptions(desiredCapacity, maxSize, stateSavedAt),
-					},
-				},
+			asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+				AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{asg},
 			}, nil),
 
+			// For fetchInstances
 			ec2Mock.EXPECT().DescribeInstances(ctx, gomock.Any()).Return(&ec2.DescribeInstancesOutput{
-				Reservations: oldReservations,
+				Reservations: append(oldReservations, newReservations...),
 			}, nil),
 
+			// For launchNewInstances that calls waitUntilInstancesInService only once
+			asMock.EXPECT().DescribeAutoScalingGroups(ctx, gomock.Any()).Return(&autoscaling.DescribeAutoScalingGroupsOutput{
+				AutoScalingGroups: []autoscalingtypes.AutoScalingGroup{asg},
+			}, nil),
+
+			clusterMock.EXPECT().WaitUntilContainerInstancesRegistered(ctx, len(newInstances), gomock.AssignableToTypeOf(&time.Time{})),
 			expectTerminateInstances(t, ctx, asMock, ec2Mock, drainerMock, oldInstances, newInstances, oldReservations, newReservations, desiredCapacity, maxSize),
 			expectRestoreState(t, ctx, asMock, desiredCapacity, maxSize, stateSavedAt),
 		)
@@ -660,7 +681,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := group.ReplaceInstances(ctx, drainerMock); err != nil {
+		if err := group.ReplaceInstances(ctx, drainerMock, clusterMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})

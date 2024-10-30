@@ -35,7 +35,7 @@ launches new ones.`,
 
 func replaceAutoScalingGroupInstances(cmd *cobra.Command, args []string) error {
 	name, _ := replaceAutoScalingGroupInstancesCmd.Flags().GetString("auto-scaling-group-name")
-	cluster, _ := replaceAutoScalingGroupInstancesCmd.Flags().GetString("cluster")
+	clusterName, _ := replaceAutoScalingGroupInstancesCmd.Flags().GetString("cluster")
 	batchSize, _ := replaceAutoScalingGroupInstancesCmd.Flags().GetInt32("batch-size")
 
 	cfg, err := newConfig(cmd.Context())
@@ -48,12 +48,13 @@ func replaceAutoScalingGroupInstances(cmd *cobra.Command, args []string) error {
 		return newRuntimeError("failed to initialize a AutoScalingGroup: %w", err)
 	}
 
-	drainer, err := capacity.NewDrainer(cluster, batchSize, ecs.NewFromConfig(cfg))
+	ecsSvc := ecs.NewFromConfig(cfg)
+	drainer, err := capacity.NewDrainer(clusterName, batchSize, ecsSvc)
 	if err != nil {
 		return newRuntimeError("failed to initialize a Drainer: %w", err)
 	}
 
-	if err := asg.ReplaceInstances(cmd.Context(), drainer); err != nil {
+	if err := asg.ReplaceInstances(cmd.Context(), drainer, capacity.NewCluster(clusterName, ecsSvc)); err != nil {
 		return newRuntimeError("failed to replace instances: %w", err)
 	}
 	return nil

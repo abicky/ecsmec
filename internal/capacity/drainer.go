@@ -55,7 +55,7 @@ func (d *drainer) Drain(ctx context.Context, instanceIDs []string) error {
 		processedCount += len(instances)
 
 		arns := make([]*string, len(instances))
-		fmt.Printf("Drain the following container instances in the cluster \"%s\":\n", d.cluster)
+		fmt.Printf("Drain the following %d container instances in the cluster \"%s\":\n", len(instances), d.cluster)
 		for i, instance := range instances {
 			arns[i] = instance.ContainerInstanceArn
 			fmt.Printf("\t%s (%s)\n", getContainerInstanceID(*instance.ContainerInstanceArn), *instance.Ec2InstanceId)
@@ -72,7 +72,7 @@ func (d *drainer) Drain(ctx context.Context, instanceIDs []string) error {
 		return xerrors.Errorf("no target instances exist in the cluster \"%s\"", d.cluster)
 	}
 	if processedCount != len(instanceIDs) {
-		return xerrors.Errorf("%d instances should be drained but only %d instances was drained", len(instanceIDs), processedCount)
+		return xerrors.Errorf("%d instances should be drained but only %d instances were drained", len(instanceIDs), processedCount)
 	}
 
 	return nil
@@ -250,7 +250,7 @@ func (d *drainer) processContainerInstances(ctx context.Context, instanceIDs []s
 		}
 
 		if err := callback(resp.ContainerInstances); err != nil {
-			return xerrors.Errorf("failed to list container instances: %w", err)
+			return xerrors.Errorf("failed to execute the callback: %w", err)
 		}
 	}
 
