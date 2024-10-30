@@ -44,6 +44,23 @@ func createReservations(instances []autoscalingtypes.Instance, launchTime time.T
 	return reservations
 }
 
+func createTagDescriptions(desiredCapacity, maxSize int32, stateSavedAt string) []autoscalingtypes.TagDescription {
+	return []autoscalingtypes.TagDescription{
+		{
+			Key:   aws.String("ecsmec:OriginalDesiredCapacity"),
+			Value: aws.String(fmt.Sprint(desiredCapacity)),
+		},
+		{
+			Key:   aws.String("ecsmec:OriginalMaxSize"),
+			Value: aws.String(fmt.Sprint(maxSize)),
+		},
+		{
+			Key:   aws.String("ecsmec:StateSavedAt"),
+			Value: aws.String(stateSavedAt),
+		},
+	}
+}
+
 func expectLaunchNewInstances(
 	t *testing.T,
 	ctx context.Context,
@@ -126,20 +143,7 @@ func expectLaunchNewInstances(
 					DesiredCapacity:      aws.Int32(newDesiredCapacity),
 					Instances:            append(existingInstances, newInstances...),
 					MaxSize:              aws.Int32(newDesiredCapacity),
-					Tags: []autoscalingtypes.TagDescription{
-						{
-							Key:   aws.String("ecsmec:OriginalDesiredCapacity"),
-							Value: aws.String(fmt.Sprint(desiredCapacity)),
-						},
-						{
-							Key:   aws.String("ecsmec:OriginalMaxSize"),
-							Value: aws.String(fmt.Sprint(maxSize)),
-						},
-						{
-							Key:   aws.String("ecsmec:StateSavedAt"),
-							Value: aws.String(stateSavedAt),
-						},
-					},
+					Tags:                 createTagDescriptions(desiredCapacity, maxSize, stateSavedAt),
 				},
 			},
 		}, nil),
@@ -335,20 +339,7 @@ func TestNewAutoScalingGroup(t *testing.T) {
 				{
 					DesiredCapacity: aws.Int32(increasedDesiredCapacity),
 					MaxSize:         aws.Int32(increasedDesiredCapacity),
-					Tags: []autoscalingtypes.TagDescription{
-						{
-							Key:   aws.String("ecsmec:OriginalDesiredCapacity"),
-							Value: aws.String(fmt.Sprint(desiredCapacity)),
-						},
-						{
-							Key:   aws.String("ecsmec:OriginalMaxSize"),
-							Value: aws.String(fmt.Sprint(maxSize)),
-						},
-						{
-							Key:   aws.String("ecsmec:StateSavedAt"),
-							Value: aws.String(stateSavedAt.Format(time.RFC3339)),
-						},
-					},
+					Tags:            createTagDescriptions(desiredCapacity, maxSize, stateSavedAt.Format(time.RFC3339)),
 				},
 			},
 		}, nil)
@@ -588,20 +579,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 						DesiredCapacity: aws.Int32(desiredCapacity),
 						Instances:       instances,
 						MaxSize:         aws.Int32(maxSize),
-						Tags: []autoscalingtypes.TagDescription{
-							{
-								Key:   aws.String("ecsmec:OriginalDesiredCapacity"),
-								Value: aws.String(fmt.Sprint(desiredCapacity)),
-							},
-							{
-								Key:   aws.String("ecsmec:OriginalMaxSize"),
-								Value: aws.String(fmt.Sprint(maxSize)),
-							},
-							{
-								Key:   aws.String("ecsmec:StateSavedAt"),
-								Value: aws.String(stateSavedAt),
-							},
-						},
+						Tags:            createTagDescriptions(desiredCapacity, maxSize, stateSavedAt),
 					},
 				},
 			}, nil),
@@ -635,23 +613,10 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 		asMock := capacitymock.NewMockAutoScalingAPI(ctrl)
 		ec2Mock := capacitymock.NewMockEC2API(ctrl)
 		drainerMock := capacitymock.NewMockDrainer(ctrl)
+		clusterMock := capacitymock.NewMockCluster(ctrl)
 
 		now := time.Now().UTC()
 		stateSavedAt := now.Format(time.RFC3339)
-		tags := []autoscalingtypes.TagDescription{
-			{
-				Key:   aws.String("ecsmec:OriginalDesiredCapacity"),
-				Value: aws.String(fmt.Sprint(desiredCapacity)),
-			},
-			{
-				Key:   aws.String("ecsmec:OriginalMaxSize"),
-				Value: aws.String(fmt.Sprint(maxSize)),
-			},
-			{
-				Key:   aws.String("ecsmec:StateSavedAt"),
-				Value: aws.String(stateSavedAt),
-			},
-		}
 
 		oldInstances := append(
 			createInstances("ap-northeast-1a", int(desiredCapacity/2)),
@@ -677,7 +642,7 @@ func TestAutoScalingGroup_ReplaceInstances(t *testing.T) {
 						DesiredCapacity: aws.Int32(int32(len(oldInstances) + len(newInstances))),
 						Instances:       append(oldInstances, newInstances...),
 						MaxSize:         aws.Int32(int32(len(oldInstances) + len(newInstances))),
-						Tags:            tags,
+						Tags:            createTagDescriptions(desiredCapacity, maxSize, stateSavedAt),
 					},
 				},
 			}, nil),
