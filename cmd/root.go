@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 	"golang.org/x/xerrors"
 )
@@ -31,7 +33,7 @@ func (e *runtimeError) Error() string {
 	return fmt.Sprintf("%+v", e.err)
 }
 
-func newRuntimeError(format string, a ...interface{}) error {
+func newRuntimeError(format string, a ...any) error {
 	return &runtimeError{
 		err: xerrors.Errorf(format, a...),
 	}
@@ -40,7 +42,7 @@ func newRuntimeError(format string, a ...interface{}) error {
 func Execute() int {
 	if cmd, err := rootCmd.ExecuteC(); err != nil {
 		var rerr *runtimeError
-		if xerrors.As(err, &rerr) {
+		if errors.As(err, &rerr) {
 			rootCmd.Println("Error:", err)
 			return 1
 		}
@@ -62,13 +64,8 @@ func init() {
 	rootCmd.PersistentFlags().String("region", "", "The AWS region")
 }
 
-func newSession() (*session.Session, error) {
+func newConfig(ctx context.Context) (aws.Config, error) {
 	region, _ := rootCmd.Flags().GetString("region")
 	profile, _ := rootCmd.Flags().GetString("profile")
-	return session.NewSessionWithOptions(session.Options{
-		Config: aws.Config{
-			Region: aws.String(region),
-		},
-		Profile: profile,
-	})
+	return config.LoadDefaultConfig(ctx, config.WithRegion(region), config.WithSharedConfigProfile(profile))
 }

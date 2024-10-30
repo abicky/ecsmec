@@ -1,46 +1,50 @@
 package service_test
 
 import (
-	"io/ioutil"
+	"context"
+	"io"
 	"log"
 	"os"
 	"reflect"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/ecs"
-	"github.com/golang/mock/gomock"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+	"go.uber.org/mock/gomock"
 
 	"github.com/abicky/ecsmec/internal/service"
-	"github.com/abicky/ecsmec/internal/testing/mocks"
+	"github.com/abicky/ecsmec/internal/testing/servicemock"
 	"github.com/abicky/ecsmec/internal/testing/testutil"
 )
 
 func TestMain(m *testing.M) {
-	log.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
 	os.Exit(m.Run())
 }
 
 func expectCopy(
 	t *testing.T,
-	ecsMock *mocks.MockECSAPI,
+	ctx context.Context,
+	ecsMock *servicemock.MockECSAPI,
 	cluster, srcServiceName, dstServiceName string,
-	srcStrategy, dstStrategy []*ecs.PlacementStrategy,
-	desiredCount int64,
+	srcStrategy, dstStrategy []ecstypes.PlacementStrategy,
+	desiredCount int32,
 ) *gomock.Call {
 	t.Helper()
 
 	return testutil.InOrder(
-		ecsMock.EXPECT().DescribeServices(gomock.Any()).DoAndReturn(func(input *ecs.DescribeServicesInput) (*ecs.DescribeServicesOutput, error) {
-			if *input.Services[0] != srcServiceName {
-				t.Errorf("*input.Service[0] = %s; want %s", *input.Services[0], srcServiceName)
+		ecsMock.EXPECT().DescribeServices(ctx, gomock.Any()).DoAndReturn(func(ctx context.Context, input *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
+			if input.Services[0] != srcServiceName {
+				t.Errorf("*input.Service[0] = %s; want %s", input.Services[0], srcServiceName)
 			}
 			return &ecs.DescribeServicesOutput{
-				Services: []*ecs.Service{
+				Services: []ecstypes.Service{
 					{
 						ClusterArn:        aws.String(cluster),
 						ServiceName:       aws.String(srcServiceName),
-						DesiredCount:      aws.Int64(desiredCount),
+						Deployments:       make([]ecstypes.Deployment, 1),
+						DesiredCount:      desiredCount,
 						PlacementStrategy: srcStrategy,
 						Status:            aws.String("ACTIVE"),
 					},
@@ -48,7 +52,7 @@ func expectCopy(
 			}, nil
 		}),
 
-		ecsMock.EXPECT().CreateService(gomock.Any()).Do(func(input *ecs.CreateServiceInput) {
+		ecsMock.EXPECT().CreateService(ctx, gomock.Any()).Do(func(_ context.Context, input *ecs.CreateServiceInput, _ ...func(*ecs.Options)) {
 			if *input.ServiceName != dstServiceName {
 				t.Errorf("*input.ServiceName = %s; want %s", *input.ServiceName, dstServiceName)
 			}
@@ -63,13 +67,29 @@ func expectCopy(
 			}
 		}),
 
-		ecsMock.EXPECT().WaitUntilServicesStable(gomock.Any()),
+		// For ecs.ServicesStableWaiter
+		ecsMock.EXPECT().DescribeServices(testutil.AnyContext(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, input *ecs.DescribeServicesInput, _ ...func(*ecs.Options)) (*ecs.DescribeServicesOutput, error) {
+			if input.Services[0] != dstServiceName {
+				t.Errorf("*input.Service[0] = %s; want %s", input.Services[0], dstServiceName)
+			}
+			return &ecs.DescribeServicesOutput{
+				Services: []ecstypes.Service{
+					{
+						Deployments:  make([]ecstypes.Deployment, 1),
+						DesiredCount: desiredCount,
+						RunningCount: desiredCount,
+						Status:       aws.String("ACTIVE"),
+					},
+				},
+			}, nil
+		}),
 	)
 }
 
 func expectStopAndDelete(
 	t *testing.T,
-	ecsMock *mocks.MockECSAPI,
+	ctx context.Context,
+	ecsMock *servicemock.MockECSAPI,
 	cluster, serviceName string,
 ) *gomock.Call {
 	t.Helper()
@@ -80,15 +100,14 @@ func expectStopAndDelete(
 	}
 
 	return testutil.InOrder(
-		ecsMock.EXPECT().ListTasksPages(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(params *ecs.ListTasksInput, fn func(*ecs.ListTasksOutput, bool) bool) error {
-				fn(&ecs.ListTasksOutput{
-					TaskArns: aws.StringSlice(runningTaskArns),
-				}, true)
-				return nil
+		ecsMock.EXPECT().ListTasks(ctx, gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ context.Context, params *ecs.ListTasksInput, _ ...func(*ecs.Options)) (*ecs.ListTasksOutput, error) {
+				return &ecs.ListTasksOutput{
+					TaskArns: runningTaskArns,
+				}, nil
 			}),
 
-		ecsMock.EXPECT().UpdateService(gomock.Any()).Do(func(input *ecs.UpdateServiceInput) {
+		ecsMock.EXPECT().UpdateService(ctx, gomock.Any()).Do(func(_ context.Context, input *ecs.UpdateServiceInput, _ ...func(*ecs.Options)) {
 			if *input.Service != serviceName {
 				t.Errorf("*input.ServiceName = %s; want %s", *input.Service, serviceName)
 			}
@@ -100,14 +119,21 @@ func expectStopAndDelete(
 			}
 		}),
 
-		ecsMock.EXPECT().WaitUntilTasksStopped(gomock.Any()).Do(func(input *ecs.DescribeTasksInput) {
-			want := aws.StringSlice(runningTaskArns)
-			if !reflect.DeepEqual(input.Tasks, want) {
-				t.Errorf("input.Tasks = %#v; want %#v", input.Tasks, want)
+		// For ecs.TasksStoppedWaiter
+		ecsMock.EXPECT().DescribeTasks(testutil.AnyContext(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ecs.DescribeTasksInput, _ ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error) {
+			if !reflect.DeepEqual(input.Tasks, runningTaskArns) {
+				t.Errorf("input.Tasks = %#v; want %#v", input.Tasks, runningTaskArns)
 			}
+			return &ecs.DescribeTasksOutput{
+				Tasks: []ecstypes.Task{
+					{
+						LastStatus: aws.String("STOPPED"),
+					},
+				},
+			}, nil
 		}),
 
-		ecsMock.EXPECT().DeleteService(gomock.Any()).Do(func(input *ecs.DeleteServiceInput) {
+		ecsMock.EXPECT().DeleteService(ctx, gomock.Any()).Do(func(_ context.Context, input *ecs.DeleteServiceInput, _ ...func(*ecs.Options)) {
 			if *input.Service != serviceName {
 				t.Errorf("*input.Service = %s; want %s", *input.Service, serviceName)
 			}
@@ -130,10 +156,10 @@ func TestService_Recreate(t *testing.T) {
 		{
 			name: "with overriding placement strategy",
 			overrides: service.Definition{
-				PlacementStrategy: []*ecs.PlacementStrategy{
+				PlacementStrategy: []ecstypes.PlacementStrategy{
 					{
 						Field: aws.String("CPU"),
-						Type:  aws.String("binpack"),
+						Type:  "binpack",
 					},
 				},
 			},
@@ -145,18 +171,20 @@ func TestService_Recreate(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			ecsMock := mocks.NewMockECSAPI(ctrl)
+			ctx := context.Background()
+
+			ecsMock := servicemock.NewMockECSAPI(ctrl)
 			tmpServiceName := serviceName + "-copied-by-ecsmec"
 
 			gomock.InOrder(
-				expectCopy(t, ecsMock, cluster, serviceName, tmpServiceName, nil, tt.overrides.PlacementStrategy, 1),
-				expectStopAndDelete(t, ecsMock, cluster, serviceName),
-				expectCopy(t, ecsMock, cluster, tmpServiceName, serviceName, tt.overrides.PlacementStrategy, tt.overrides.PlacementStrategy, 1),
-				expectStopAndDelete(t, ecsMock, cluster, tmpServiceName),
+				expectCopy(t, ctx, ecsMock, cluster, serviceName, tmpServiceName, nil, tt.overrides.PlacementStrategy, 1),
+				expectStopAndDelete(t, ctx, ecsMock, cluster, serviceName),
+				expectCopy(t, ctx, ecsMock, cluster, tmpServiceName, serviceName, tt.overrides.PlacementStrategy, tt.overrides.PlacementStrategy, 1),
+				expectStopAndDelete(t, ctx, ecsMock, cluster, tmpServiceName),
 			)
 
 			s := service.NewService(ecsMock)
-			if err := s.Recreate(cluster, serviceName, tt.overrides); err != nil {
+			if err := s.Recreate(ctx, cluster, serviceName, tt.overrides); err != nil {
 				t.Errorf("err = %#v; want nil", err)
 			}
 		})
@@ -166,32 +194,34 @@ func TestService_Recreate(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		ecsMock := mocks.NewMockECSAPI(ctrl)
+		ctx := context.Background()
+
+		ecsMock := servicemock.NewMockECSAPI(ctrl)
 
 		newServiceName := "new-name"
 
 		gomock.InOrder(
-			expectCopy(t, ecsMock, cluster, serviceName, newServiceName, nil, nil, 1),
-			expectStopAndDelete(t, ecsMock, cluster, serviceName),
+			expectCopy(t, ctx, ecsMock, cluster, serviceName, newServiceName, nil, nil, 1),
+			expectStopAndDelete(t, ctx, ecsMock, cluster, serviceName),
 		)
 
 		s := service.NewService(ecsMock)
-		if err := s.Recreate(cluster, serviceName, service.Definition{ServiceName: aws.String(newServiceName)}); err != nil {
+		if err := s.Recreate(ctx, cluster, serviceName, service.Definition{ServiceName: aws.String(newServiceName)}); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
 
 	exceptionTests := []struct {
 		name     string
-		services []*ecs.Service
+		services []ecstypes.Service
 	}{
 		{
 			name:     "with unknown service name",
-			services: []*ecs.Service{},
+			services: []ecstypes.Service{},
 		},
 		{
 			name: "with inactive service",
-			services: []*ecs.Service{
+			services: []ecstypes.Service{
 				{
 					Status: aws.String("INACTIVE"),
 				},
@@ -203,13 +233,15 @@ func TestService_Recreate(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			ecsMock := mocks.NewMockECSAPI(ctrl)
-			ecsMock.EXPECT().DescribeServices(gomock.Any()).Return(&ecs.DescribeServicesOutput{
+			ctx := context.Background()
+
+			ecsMock := servicemock.NewMockECSAPI(ctrl)
+			ecsMock.EXPECT().DescribeServices(ctx, gomock.Any()).Return(&ecs.DescribeServicesOutput{
 				Services: tt.services,
 			}, nil)
 
 			s := service.NewService(ecsMock)
-			if err := s.Recreate(cluster, serviceName, service.Definition{}); err == nil {
+			if err := s.Recreate(ctx, cluster, serviceName, service.Definition{}); err == nil {
 				t.Errorf("err = nil; want non-nil")
 			}
 		})

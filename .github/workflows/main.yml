@@ -15,19 +15,15 @@ jobs:
           - macos-latest
           - windows-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          go-version: 1.15
-      - uses: actions/cache@v1
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          go-version-file: go.mod
+
+      - run: go install go.uber.org/mock/mockgen@latest
 
       # `go test` uses only a high-confidence subset of go vet, so execute also `go vet`
-      - run: go vet ./...
+      - run: make vet
 
       - run: go fmt ./... && git diff --exit-code -- ':!go.sum'
 
@@ -38,19 +34,19 @@ jobs:
     needs: test
     if: contains(github.ref, 'tags/v')
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Check the version
         run: grep -qr "version = \"$(git tag --points-at HEAD | sed 's/^v//')\"" cmd
 
       - run: git fetch --prune --unshallow
-      - uses: actions/setup-go@v1
+      - uses: actions/setup-go@v5
         with:
-          go-version: 1.15
-      - uses: goreleaser/goreleaser-action@v1
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: release --rm-dist
+          args: release --clean
         env:
           # Use a custom token instead of GITHUB_TOKEN for the homebrew tap
           GITHUB_TOKEN: ${{ secrets.GORELEASER_GITHUB_TOKEN }}

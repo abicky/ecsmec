@@ -1,30 +1,32 @@
 package capacity
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
+	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/ecs"
-	"github.com/aws/aws-sdk-go/service/ecs/ecsiface"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"golang.org/x/xerrors"
 
 	"github.com/abicky/ecsmec/internal/const/ecsconst"
-	"github.com/abicky/ecsmec/internal/sliceutil"
 )
 
 type Drainer interface {
-	Drain([]string) error
-	ProcessInterruptions([]*sqs.Message) ([]*sqs.DeleteMessageBatchRequestEntry, error)
+	Drain(context.Context, []string) error
+	ProcessInterruptions(context.Context, []sqstypes.Message) ([]sqstypes.DeleteMessageBatchRequestEntry, error)
 }
 
 type drainer struct {
 	cluster   string
-	batchSize int64
-	ecsSvc    ecsiface.ECSAPI
+	batchSize int32
+	ecsSvc    ECSAPI
 }
 
 // cf. https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-interruptions.html
@@ -36,7 +38,7 @@ type interruptionWarningDetail struct {
 	InstanceID string `json:"instance-id"`
 }
 
-func NewDrainer(cluster string, batchSize int64, ecsSvc ecsiface.ECSAPI) (Drainer, error) {
+func NewDrainer(cluster string, batchSize int32, ecsSvc ECSAPI) (Drainer, error) {
 	if batchSize > ecsconst.MaxListableContainerInstances {
 		return nil, xerrors.Errorf("batchSize greater than %d is not supported", ecsconst.MaxListableContainerInstances)
 	}
@@ -47,9 +49,9 @@ func NewDrainer(cluster string, batchSize int64, ecsSvc ecsiface.ECSAPI) (Draine
 	}, nil
 }
 
-func (d *drainer) Drain(instanceIDs []string) error {
+func (d *drainer) Drain(ctx context.Context, instanceIDs []string) error {
 	processedCount := 0
-	err := d.processContainerInstances(instanceIDs, func(instances []*ecs.ContainerInstance) error {
+	err := d.processContainerInstances(ctx, instanceIDs, func(instances []ecstypes.ContainerInstance) error {
 		processedCount += len(instances)
 
 		arns := make([]*string, len(instances))
@@ -61,7 +63,7 @@ func (d *drainer) Drain(instanceIDs []string) error {
 		fmt.Printf("\nPress ENTER to continue ")
 		fmt.Scanln()
 
-		return d.drainContainerInstances(arns, true)
+		return d.drainContainerInstances(ctx, arns, true)
 	})
 	if err != nil {
 		return xerrors.Errorf("failed to drain container instances: %w", err)
@@ -76,7 +78,7 @@ func (d *drainer) Drain(instanceIDs []string) error {
 	return nil
 }
 
-func (d *drainer) ProcessInterruptions(messages []*sqs.Message) ([]*sqs.DeleteMessageBatchRequestEntry, error) {
+func (d *drainer) ProcessInterruptions(ctx context.Context, messages []sqstypes.Message) ([]sqstypes.DeleteMessageBatchRequestEntry, error) {
 	if len(messages) == 0 {
 		return nil, nil
 	}
@@ -92,8 +94,8 @@ func (d *drainer) ProcessInterruptions(messages []*sqs.Message) ([]*sqs.DeleteMe
 		instanceIDToReceiptHandle[w.Detail.InstanceID] = m.ReceiptHandle
 	}
 
-	entries := make([]*sqs.DeleteMessageBatchRequestEntry, 0)
-	err := d.processContainerInstances(instanceIDs, func(instances []*ecs.ContainerInstance) error {
+	entries := make([]sqstypes.DeleteMessageBatchRequestEntry, 0)
+	err := d.processContainerInstances(ctx, instanceIDs, func(instances []ecstypes.ContainerInstance) error {
 		arns := make([]*string, len(instances))
 		log.Printf("Drain the following container instances in the cluster \"%s\":\n", d.cluster)
 		for i, instance := range instances {
@@ -101,12 +103,12 @@ func (d *drainer) ProcessInterruptions(messages []*sqs.Message) ([]*sqs.DeleteMe
 			log.Printf("\t%s (%s)\n", getContainerInstanceID(*instance.ContainerInstanceArn), *instance.Ec2InstanceId)
 		}
 
-		if err := d.drainContainerInstances(arns, false); err != nil {
+		if err := d.drainContainerInstances(ctx, arns, false); err != nil {
 			return xerrors.Errorf("failed to drain container instances: %w", err)
 		}
 
 		for _, instance := range instances {
-			entries = append(entries, &sqs.DeleteMessageBatchRequestEntry{
+			entries = append(entries, sqstypes.DeleteMessageBatchRequestEntry{
 				Id:            instance.Ec2InstanceId,
 				ReceiptHandle: instanceIDToReceiptHandle[*instance.Ec2InstanceId],
 			})
@@ -121,28 +123,31 @@ func (d *drainer) ProcessInterruptions(messages []*sqs.Message) ([]*sqs.DeleteMe
 	return entries, nil
 }
 
-func (d *drainer) drainContainerInstances(arns []*string, wait bool) error {
-	allTaskArns := make([]*string, 0)
-	allServiceNames := make([]*string, 0)
+func (d *drainer) drainContainerInstances(ctx context.Context, arns []*string, wait bool) error {
+	allTaskArns := make([]string, 0)
+	allServiceNames := make([]string, 0)
 	for _, arn := range arns {
 		params := &ecs.ListTasksInput{
 			Cluster:           aws.String(d.cluster),
 			ContainerInstance: arn,
 		}
 
-		var pageErr error
-		err := d.ecsSvc.ListTasksPages(params, func(page *ecs.ListTasksOutput, lastPage bool) bool {
+		paginator := ecs.NewListTasksPaginator(d.ecsSvc, params)
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return xerrors.Errorf("failed to list tasks: %w", err)
+			}
 			if len(page.TaskArns) == 0 {
-				return false
+				break
 			}
 
-			resp, err := d.ecsSvc.DescribeTasks(&ecs.DescribeTasksInput{
+			resp, err := d.ecsSvc.DescribeTasks(ctx, &ecs.DescribeTasksInput{
 				Cluster: aws.String(d.cluster),
 				Tasks:   page.TaskArns,
 			})
 			if err != nil {
-				pageErr = xerrors.Errorf("failed to describe tasks: %w", err)
-				return false
+				return xerrors.Errorf("failed to describe tasks: %w", err)
 			}
 
 			for _, t := range resp.Tasks {
@@ -150,39 +155,34 @@ func (d *drainer) drainContainerInstances(arns []*string, wait bool) error {
 				// because other tasks can't have such a task group name due to the error "Invalid namespace for group".
 				if strings.HasPrefix(*t.Group, "service:") {
 					// Remove "service:" prefix
-					allServiceNames = append(allServiceNames, aws.String((*t.Group)[8:]))
+					serviceName := (*t.Group)[8:]
+					if !slices.Contains(allServiceNames, serviceName) {
+						allServiceNames = append(allServiceNames, serviceName)
+					}
 				} else {
 					// Stop tasks manually because tasks that don't belong to a service won't stop
 					// even after their cluster instance's status becomes "DRAINING"
 					log.Printf("Stop the task \"%s\"\n", *t.TaskArn)
-					_, err := d.ecsSvc.StopTask(&ecs.StopTaskInput{
+					_, err := d.ecsSvc.StopTask(ctx, &ecs.StopTaskInput{
 						Cluster: t.ClusterArn,
 						Reason:  aws.String("Task stopped by ecsmec"),
 						Task:    t.TaskArn,
 					})
 					if err != nil {
-						pageErr = xerrors.Errorf("failed to stop the task: %w", err)
-						return false
+						return xerrors.Errorf("failed to stop the task: %w", err)
 					}
 				}
 			}
 
 			allTaskArns = append(allTaskArns, page.TaskArns...)
-			return true
-		})
-		if err != nil {
-			return xerrors.Errorf("failed to list tasks: %w", err)
-		}
-		if pageErr != nil {
-			return xerrors.Errorf("failed to list tasks: %w", pageErr)
 		}
 	}
 
-	for arns := range sliceutil.ChunkSlice(arns, ecsconst.MaxUpdatableContainerInstancesState) {
-		_, err := d.ecsSvc.UpdateContainerInstancesState(&ecs.UpdateContainerInstancesStateInput{
+	for arns := range slices.Chunk(arns, ecsconst.MaxUpdatableContainerInstancesState) {
+		_, err := d.ecsSvc.UpdateContainerInstancesState(ctx, &ecs.UpdateContainerInstancesStateInput{
 			Cluster:            aws.String(d.cluster),
-			ContainerInstances: arns,
-			Status:             aws.String("DRAINING"),
+			ContainerInstances: aws.ToStringSlice(arns),
+			Status:             "DRAINING",
 		})
 		if err != nil {
 			return xerrors.Errorf("failed to update the container instances' state: %w", err)
@@ -194,22 +194,28 @@ func (d *drainer) drainContainerInstances(arns []*string, wait bool) error {
 	}
 
 	log.Printf("Wait for all the tasks in the cluster \"%s\" to stop\n", d.cluster)
-	for arns := range sliceutil.ChunkSlice(allTaskArns, ecsconst.MaxDescribableTasks) {
-		err := d.ecsSvc.WaitUntilTasksStopped(&ecs.DescribeTasksInput{
+	tasksStoppedWaiter := ecs.NewTasksStoppedWaiter(d.ecsSvc, func(o *ecs.TasksStoppedWaiterOptions) {
+		o.MaxDelay = 6 * time.Second
+	})
+	for arns := range slices.Chunk(allTaskArns, ecsconst.MaxDescribableTasks) {
+		err := tasksStoppedWaiter.Wait(ctx, &ecs.DescribeTasksInput{
 			Cluster: aws.String(d.cluster),
 			Tasks:   arns,
-		})
+		}, 10*time.Minute)
 		if err != nil {
-			return xerrors.Errorf("failed to wait for the tasks to stop: %w", err)
+			return xerrors.Errorf("failed to wait for tasks to stop: %w", err)
 		}
 	}
 
 	log.Printf("Wait for all the services in the cluster \"%s\" to become stable\n", d.cluster)
-	for names := range sliceutil.ChunkSlice(allServiceNames, ecsconst.MaxDescribableServices) {
-		err := d.ecsSvc.WaitUntilServicesStable(&ecs.DescribeServicesInput{
+	servicesStableWaiter := ecs.NewServicesStableWaiter(d.ecsSvc, func(o *ecs.ServicesStableWaiterOptions) {
+		o.MaxDelay = 15 * time.Second
+	})
+	for names := range slices.Chunk(allServiceNames, ecsconst.MaxDescribableServices) {
+		err := servicesStableWaiter.Wait(ctx, &ecs.DescribeServicesInput{
 			Cluster:  aws.String(d.cluster),
 			Services: names,
-		})
+		}, 10*time.Minute)
 		if err != nil {
 			return xerrors.Errorf("failed to wait for the services to become stable: %w", err)
 		}
@@ -218,39 +224,34 @@ func (d *drainer) drainContainerInstances(arns []*string, wait bool) error {
 	return nil
 }
 
-func (d *drainer) processContainerInstances(instanceIDs []string, callback func([]*ecs.ContainerInstance) error) error {
+func (d *drainer) processContainerInstances(ctx context.Context, instanceIDs []string, callback func([]ecstypes.ContainerInstance) error) error {
 	params := &ecs.ListContainerInstancesInput{
 		Cluster:    aws.String(d.cluster),
 		Filter:     aws.String(fmt.Sprintf("ec2InstanceId in [%s]", strings.Join(instanceIDs, ","))),
-		MaxResults: aws.Int64(d.batchSize),
+		MaxResults: aws.Int32(d.batchSize),
 	}
 
-	var pageErr error
-	err := d.ecsSvc.ListContainerInstancesPages(params, func(page *ecs.ListContainerInstancesOutput, lastPage bool) bool {
+	paginator := ecs.NewListContainerInstancesPaginator(d.ecsSvc, params)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return xerrors.Errorf("failed to list container instances: %w", err)
+		}
 		if len(page.ContainerInstanceArns) == 0 {
-			return true
+			break
 		}
 
-		resp, err := d.ecsSvc.DescribeContainerInstances(&ecs.DescribeContainerInstancesInput{
+		resp, err := d.ecsSvc.DescribeContainerInstances(ctx, &ecs.DescribeContainerInstancesInput{
 			Cluster:            aws.String(d.cluster),
 			ContainerInstances: page.ContainerInstanceArns,
 		})
 		if err != nil {
-			pageErr = xerrors.Errorf("failed to describe container instances: %w", err)
-			return false
+			return xerrors.Errorf("failed to describe container instances: %w", err)
 		}
 
 		if err := callback(resp.ContainerInstances); err != nil {
-			pageErr = err
-			return false
+			return xerrors.Errorf("failed to list container instances: %w", err)
 		}
-		return true
-	})
-	if err != nil {
-		return xerrors.Errorf("failed to list container instances: %w", err)
-	}
-	if pageErr != nil {
-		return xerrors.Errorf("failed to list container instances: %w", pageErr)
 	}
 
 	return nil

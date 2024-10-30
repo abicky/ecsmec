@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	"github.com/spf13/cobra"
 
 	"github.com/abicky/ecsmec/internal/capacity"
@@ -16,7 +16,7 @@ func init() {
 		Use:   "terminate-spot-fleet-instances",
 		Short: "Terminate spot fleet instances",
 		Long: `This command terminates all the container instances safely that belong
-to the specified spot fleet request.`,
+to the specified spot fleet request with state "cancelled".`,
 		RunE: terminateSpotFleetInstances,
 	}
 	rootCmd.AddCommand(cmd)
@@ -26,7 +26,7 @@ to the specified spot fleet request.`,
 
 	cmd.Flags().String("cluster", "default", "The name of the target `CLUSTER`")
 
-	cmd.Flags().Int64("batch-size", ecsconst.MaxListableContainerInstances, "The number of instances drained at a once")
+	cmd.Flags().Int32("batch-size", ecsconst.MaxListableContainerInstances, "The number of instances drained at a once")
 
 	terminateSpotFleetInstancesCmd = cmd
 }
@@ -34,24 +34,24 @@ to the specified spot fleet request.`,
 func terminateSpotFleetInstances(cmd *cobra.Command, args []string) error {
 	id, _ := terminateSpotFleetInstancesCmd.Flags().GetString("spot-fleet-request-id")
 	cluster, _ := terminateSpotFleetInstancesCmd.Flags().GetString("cluster")
-	batchSize, _ := terminateSpotFleetInstancesCmd.Flags().GetInt64("batch-size")
+	batchSize, _ := terminateSpotFleetInstancesCmd.Flags().GetInt32("batch-size")
 
-	sess, err := newSession()
+	cfg, err := newConfig(cmd.Context())
 	if err != nil {
 		return newRuntimeError("failed to initialize a session: %w", err)
 	}
 
-	sfr, err := capacity.NewSpotFleetRequest(id, ec2.New(sess))
+	sfr, err := capacity.NewSpotFleetRequest(id, ec2.NewFromConfig(cfg))
 	if err != nil {
 		return newRuntimeError("failed to initialize a SpotFleetRequest: %w", err)
 	}
 
-	drainer, err := capacity.NewDrainer(cluster, batchSize, ecs.New(sess))
+	drainer, err := capacity.NewDrainer(cluster, batchSize, ecs.NewFromConfig(cfg))
 	if err != nil {
 		return newRuntimeError("failed to initialize a Drainer: %w", err)
 	}
 
-	if err := sfr.TerminateAllInstances(drainer); err != nil {
+	if err := sfr.TerminateAllInstances(cmd.Context(), drainer); err != nil {
 		return newRuntimeError("failed to terminate instances: %w", err)
 	}
 	return nil

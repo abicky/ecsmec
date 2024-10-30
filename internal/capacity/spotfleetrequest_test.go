@@ -5,13 +5,15 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/golang/mock/gomock"
+	"github.com/abicky/ecsmec/internal/testing/testutil"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"go.uber.org/mock/gomock"
 
 	"github.com/abicky/ecsmec/internal/capacity"
-	"github.com/abicky/ecsmec/internal/testing/mocks"
+	"github.com/abicky/ecsmec/internal/testing/capacitymock"
 )
 
 func TestSpotFleetRequest_TerminateAllInstances(t *testing.T) {
@@ -25,50 +27,80 @@ func TestSpotFleetRequest_TerminateAllInstances(t *testing.T) {
 		createInstances("ap-northeast-1c", 1)...,
 	)
 
-	activeInstances := make([]*ec2.ActiveInstance, len(instances))
+	activeInstances := make([]ec2types.ActiveInstance, len(instances))
 	for i, instance := range instances {
-		activeInstances[i] = &ec2.ActiveInstance{
+		activeInstances[i] = ec2types.ActiveInstance{
 			InstanceId:            instance.InstanceId,
 			SpotInstanceRequestId: aws.String(spotFleetRequestID),
 		}
 	}
 
 	t.Run("with the state cancelled_running", func(t *testing.T) {
-		ec2Mock := mocks.NewMockEC2API(ctrl)
-		drainerMock := mocks.NewMockDrainer(ctrl)
+		ctx := context.Background()
+
+		ec2Mock := capacitymock.NewMockEC2API(ctrl)
+		drainerMock := capacitymock.NewMockDrainer(ctrl)
 
 		gomock.InOrder(
-			ec2Mock.EXPECT().DescribeSpotFleetRequests(gomock.Any()).Return(&ec2.DescribeSpotFleetRequestsOutput{
-				SpotFleetRequestConfigs: []*ec2.SpotFleetRequestConfig{
+			ec2Mock.EXPECT().DescribeSpotFleetRequests(ctx, gomock.Any()).Return(&ec2.DescribeSpotFleetRequestsOutput{
+				SpotFleetRequestConfigs: []ec2types.SpotFleetRequestConfig{
 					{
-						SpotFleetRequestConfig: &ec2.SpotFleetRequestConfigData{
-							Type: aws.String("maintain"),
+						SpotFleetRequestConfig: &ec2types.SpotFleetRequestConfigData{
+							Type: "maintain",
 						},
 						SpotFleetRequestId:    aws.String(spotFleetRequestID),
-						SpotFleetRequestState: aws.String("cancelled_running"),
+						SpotFleetRequestState: "cancelled_running",
 					},
 				},
 			}, nil),
 
-			ec2Mock.EXPECT().DescribeSpotFleetInstances(gomock.Any()).Return(&ec2.DescribeSpotFleetInstancesOutput{
+			ec2Mock.EXPECT().DescribeSpotFleetInstances(ctx, gomock.Any()).Return(&ec2.DescribeSpotFleetInstancesOutput{
 				ActiveInstances:    activeInstances,
 				SpotFleetRequestId: aws.String(spotFleetRequestID),
 			}, nil),
 
-			drainerMock.EXPECT().Drain(gomock.Len(len(instances))),
+			drainerMock.EXPECT().Drain(ctx, gomock.Len(len(instances))),
 
-			ec2Mock.EXPECT().TerminateInstances(gomock.Any()).Do(func(input *ec2.TerminateInstancesInput) {
+			ec2Mock.EXPECT().TerminateInstances(ctx, gomock.Any()).Do(func(_ context.Context, input *ec2.TerminateInstancesInput, _ ...func(*ec2.Options)) {
 				want := make([]string, len(instances))
 				for i, instance := range instances {
 					want[i] = *instance.InstanceId
 				}
-				got := aws.StringValueSlice(input.InstanceIds)
+				got := input.InstanceIds
 				if !reflect.DeepEqual(got, want) {
 					t.Errorf("aws.StringValueSlice(input.InstanceIds) = %#v; want %#v", got, want)
 				}
 			}),
 
-			ec2Mock.EXPECT().WaitUntilInstanceTerminated(gomock.Any()),
+			// For InstanceTerminatedWaiter
+			ec2Mock.EXPECT().DescribeInstances(testutil.AnyContext(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, input *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
+				instanceIds := make([]string, len(instances))
+				for i, instance := range instances {
+					instanceIds[i] = *instance.InstanceId
+				}
+
+				if !testutil.MatchSlice(input.InstanceIds, instanceIds) {
+					t.Errorf("input.InstanceIds = %v; want %v", input.InstanceIds, instanceIds)
+				}
+
+				instances := make([]ec2types.Instance, len(instanceIds))
+				for i, id := range instanceIds {
+					instances[i] = ec2types.Instance{
+						InstanceId: aws.String(id),
+						State: &ec2types.InstanceState{
+							Name: "terminated",
+						},
+					}
+				}
+
+				return &ec2.DescribeInstancesOutput{
+					Reservations: []ec2types.Reservation{
+						{
+							Instances: instances,
+						},
+					},
+				}, nil
+			}),
 		)
 
 		sfr, err := capacity.NewSpotFleetRequest(spotFleetRequestID, ec2Mock)
@@ -76,29 +108,31 @@ func TestSpotFleetRequest_TerminateAllInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := sfr.TerminateAllInstances(drainerMock); err != nil {
+		if err := sfr.TerminateAllInstances(ctx, drainerMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
 
 	t.Run("with the state active", func(t *testing.T) {
-		ec2Mock := mocks.NewMockEC2API(ctrl)
-		drainerMock := mocks.NewMockDrainer(ctrl)
+		ctx := context.Background()
+
+		ec2Mock := capacitymock.NewMockEC2API(ctrl)
+		drainerMock := capacitymock.NewMockDrainer(ctrl)
 
 		gomock.InOrder(
-			ec2Mock.EXPECT().DescribeSpotFleetRequests(gomock.Any()).Return(&ec2.DescribeSpotFleetRequestsOutput{
-				SpotFleetRequestConfigs: []*ec2.SpotFleetRequestConfig{
+			ec2Mock.EXPECT().DescribeSpotFleetRequests(ctx, gomock.Any()).Return(&ec2.DescribeSpotFleetRequestsOutput{
+				SpotFleetRequestConfigs: []ec2types.SpotFleetRequestConfig{
 					{
-						SpotFleetRequestConfig: &ec2.SpotFleetRequestConfigData{
-							Type: aws.String("maintain"),
+						SpotFleetRequestConfig: &ec2types.SpotFleetRequestConfigData{
+							Type: "maintain",
 						},
 						SpotFleetRequestId:    aws.String(spotFleetRequestID),
-						SpotFleetRequestState: aws.String("active"),
+						SpotFleetRequestState: "active",
 					},
 				},
 			}, nil),
 
-			ec2Mock.EXPECT().DescribeSpotFleetInstances(gomock.Any()).Return(&ec2.DescribeSpotFleetInstancesOutput{
+			ec2Mock.EXPECT().DescribeSpotFleetInstances(ctx, gomock.Any()).Return(&ec2.DescribeSpotFleetInstancesOutput{
 				ActiveInstances:    activeInstances,
 				SpotFleetRequestId: aws.String(spotFleetRequestID),
 			}, nil),
@@ -109,7 +143,7 @@ func TestSpotFleetRequest_TerminateAllInstances(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := sfr.TerminateAllInstances(drainerMock); err == nil {
+		if err := sfr.TerminateAllInstances(ctx, drainerMock); err == nil {
 			t.Errorf("err = nil; want non-nil")
 		}
 	})
@@ -119,20 +153,20 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 	tests := []struct {
 		name                 string
 		drainedInstanceCount int
-		finalTargetCapacity  int64
-		amount               int64
-		config               *ec2.SpotFleetRequestConfigData
+		finalTargetCapacity  int32
+		amount               int32
+		config               *ec2types.SpotFleetRequestConfigData
 	}{
 		{
 			name:                 "without weighted capacity in the launch template configs",
 			drainedInstanceCount: 3,
 			finalTargetCapacity:  7,
 			amount:               3,
-			config: &ec2.SpotFleetRequestConfigData{
-				LaunchTemplateConfigs: []*ec2.LaunchTemplateConfig{
+			config: &ec2types.SpotFleetRequestConfigData{
+				LaunchTemplateConfigs: []ec2types.LaunchTemplateConfig{
 					{},
 				},
-				TargetCapacity: aws.Int64(10),
+				TargetCapacity: aws.Int32(10),
 			},
 		},
 		{
@@ -140,17 +174,17 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 			drainedInstanceCount: 1,
 			finalTargetCapacity:  7,
 			amount:               3,
-			config: &ec2.SpotFleetRequestConfigData{
-				LaunchTemplateConfigs: []*ec2.LaunchTemplateConfig{
+			config: &ec2types.SpotFleetRequestConfigData{
+				LaunchTemplateConfigs: []ec2types.LaunchTemplateConfig{
 					{
-						Overrides: []*ec2.LaunchTemplateOverrides{
+						Overrides: []ec2types.LaunchTemplateOverrides{
 							{
 								WeightedCapacity: aws.Float64(2),
 							},
 						},
 					},
 				},
-				TargetCapacity: aws.Int64(10),
+				TargetCapacity: aws.Int32(10),
 			},
 		},
 		{
@@ -158,11 +192,11 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 			drainedInstanceCount: 3,
 			finalTargetCapacity:  7,
 			amount:               3,
-			config: &ec2.SpotFleetRequestConfigData{
-				LaunchSpecifications: []*ec2.SpotFleetLaunchSpecification{
+			config: &ec2types.SpotFleetRequestConfigData{
+				LaunchSpecifications: []ec2types.SpotFleetLaunchSpecification{
 					{},
 				},
-				TargetCapacity: aws.Int64(10),
+				TargetCapacity: aws.Int32(10),
 			},
 		},
 		{
@@ -170,13 +204,13 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 			drainedInstanceCount: 1,
 			finalTargetCapacity:  7,
 			amount:               3,
-			config: &ec2.SpotFleetRequestConfigData{
-				LaunchSpecifications: []*ec2.SpotFleetLaunchSpecification{
+			config: &ec2types.SpotFleetRequestConfigData{
+				LaunchSpecifications: []ec2types.SpotFleetLaunchSpecification{
 					{
 						WeightedCapacity: aws.Float64(2),
 					},
 				},
-				TargetCapacity: aws.Int64(10),
+				TargetCapacity: aws.Int32(10),
 			},
 		},
 		{
@@ -184,11 +218,11 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 			drainedInstanceCount: 1,
 			finalTargetCapacity:  0,
 			amount:               2,
-			config: &ec2.SpotFleetRequestConfigData{
-				LaunchTemplateConfigs: []*ec2.LaunchTemplateConfig{
+			config: &ec2types.SpotFleetRequestConfigData{
+				LaunchTemplateConfigs: []ec2types.LaunchTemplateConfig{
 					{},
 				},
-				TargetCapacity: aws.Int64(1),
+				TargetCapacity: aws.Int32(1),
 			},
 		},
 	}
@@ -198,21 +232,23 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
+			ctx := context.Background()
+
 			spotFleetRequestID := "sfr-39d27795-73f7-4c2d-976f-3262e0c988af"
-			ec2Mock := mocks.NewMockEC2API(ctrl)
-			drainerMock := mocks.NewMockDrainer(ctrl)
-			pollerMock := mocks.NewMockPoller(ctrl)
+			ec2Mock := capacitymock.NewMockEC2API(ctrl)
+			drainerMock := capacitymock.NewMockDrainer(ctrl)
+			pollerMock := capacitymock.NewMockPoller(ctrl)
 
-			messages := make([]*sqs.Message, tt.drainedInstanceCount)
-			entries := make([]*sqs.DeleteMessageBatchRequestEntry, tt.drainedInstanceCount)
+			messages := make([]sqstypes.Message, tt.drainedInstanceCount)
+			entries := make([]sqstypes.DeleteMessageBatchRequestEntry, tt.drainedInstanceCount)
 
-			pollerMock.EXPECT().Poll(gomock.Any(), gomock.Any()).Do(func(ctx context.Context, fn func([]*sqs.Message) ([]*sqs.DeleteMessageBatchRequestEntry, error)) {
+			pollerMock.EXPECT().Poll(gomock.Any(), gomock.Any()).Do(func(ctx context.Context, fn func([]sqstypes.Message) ([]sqstypes.DeleteMessageBatchRequestEntry, error)) {
 				fn(messages)
 			})
 
 			gomock.InOrder(
-				ec2Mock.EXPECT().DescribeSpotFleetRequests(gomock.Any()).Return(&ec2.DescribeSpotFleetRequestsOutput{
-					SpotFleetRequestConfigs: []*ec2.SpotFleetRequestConfig{
+				ec2Mock.EXPECT().DescribeSpotFleetRequests(ctx, gomock.Any()).Return(&ec2.DescribeSpotFleetRequestsOutput{
+					SpotFleetRequestConfigs: []ec2types.SpotFleetRequestConfig{
 						{
 							SpotFleetRequestId:     aws.String(spotFleetRequestID),
 							SpotFleetRequestConfig: tt.config,
@@ -220,13 +256,13 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 					},
 				}, nil),
 
-				ec2Mock.EXPECT().ModifySpotFleetRequest(gomock.Any()).Do(func(input *ec2.ModifySpotFleetRequestInput) {
+				ec2Mock.EXPECT().ModifySpotFleetRequest(ctx, gomock.Any()).Do(func(_ context.Context, input *ec2.ModifySpotFleetRequestInput, _ ...func(*ec2.Options)) {
 					if *input.TargetCapacity != tt.finalTargetCapacity {
 						t.Errorf("*input.TargetCapacity = %d; want %d", *input.TargetCapacity, tt.finalTargetCapacity)
 					}
 				}),
 
-				drainerMock.EXPECT().ProcessInterruptions(messages).Return(entries, nil),
+				drainerMock.EXPECT().ProcessInterruptions(ctx, messages).Return(entries, nil),
 			)
 
 			sfr, err := capacity.NewSpotFleetRequest(spotFleetRequestID, ec2Mock)
@@ -234,7 +270,7 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := sfr.ReduceCapacity(tt.amount, drainerMock, pollerMock); err != nil {
+			if err := sfr.ReduceCapacity(ctx, tt.amount, drainerMock, pollerMock); err != nil {
 				t.Errorf("err = %#v; want nil", err)
 			}
 		})
@@ -244,17 +280,19 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		spotFleetRequestID := "sfr-39d27795-73f7-4c2d-976f-3262e0c988af"
-		ec2Mock := mocks.NewMockEC2API(ctrl)
-		drainerMock := mocks.NewMockDrainer(ctrl)
-		pollerMock := mocks.NewMockPoller(ctrl)
+		ctx := context.Background()
 
-		ec2Mock.EXPECT().DescribeSpotFleetRequests(gomock.Any()).Return(&ec2.DescribeSpotFleetRequestsOutput{
-			SpotFleetRequestConfigs: []*ec2.SpotFleetRequestConfig{
+		spotFleetRequestID := "sfr-39d27795-73f7-4c2d-976f-3262e0c988af"
+		ec2Mock := capacitymock.NewMockEC2API(ctrl)
+		drainerMock := capacitymock.NewMockDrainer(ctrl)
+		pollerMock := capacitymock.NewMockPoller(ctrl)
+
+		ec2Mock.EXPECT().DescribeSpotFleetRequests(ctx, gomock.Any()).Return(&ec2.DescribeSpotFleetRequestsOutput{
+			SpotFleetRequestConfigs: []ec2types.SpotFleetRequestConfig{
 				{
 					SpotFleetRequestId: aws.String(spotFleetRequestID),
-					SpotFleetRequestConfig: &ec2.SpotFleetRequestConfigData{
-						TargetCapacity: aws.Int64(0),
+					SpotFleetRequestConfig: &ec2types.SpotFleetRequestConfigData{
+						TargetCapacity: aws.Int32(0),
 					},
 				},
 			},
@@ -265,21 +303,21 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := sfr.ReduceCapacity(1, drainerMock, pollerMock); err != nil {
+		if err := sfr.ReduceCapacity(ctx, 1, drainerMock, pollerMock); err != nil {
 			t.Errorf("err = %#v; want nil", err)
 		}
 	})
 
 	exceptionTests := []struct {
 		name   string
-		config *ec2.SpotFleetRequestConfigData
+		config *ec2types.SpotFleetRequestConfigData
 	}{
 		{
 			name: "with mixed weighted capacities and a launch template",
-			config: &ec2.SpotFleetRequestConfigData{
-				LaunchTemplateConfigs: []*ec2.LaunchTemplateConfig{
+			config: &ec2types.SpotFleetRequestConfigData{
+				LaunchTemplateConfigs: []ec2types.LaunchTemplateConfig{
 					{
-						Overrides: []*ec2.LaunchTemplateOverrides{
+						Overrides: []ec2types.LaunchTemplateOverrides{
 							{
 								WeightedCapacity: aws.Float64(1),
 							},
@@ -289,13 +327,13 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 						},
 					},
 				},
-				TargetCapacity: aws.Int64(1),
+				TargetCapacity: aws.Int32(1),
 			},
 		},
 		{
 			name: "with mixed weighted capacities and without a launch template",
-			config: &ec2.SpotFleetRequestConfigData{
-				LaunchSpecifications: []*ec2.SpotFleetLaunchSpecification{
+			config: &ec2types.SpotFleetRequestConfigData{
+				LaunchSpecifications: []ec2types.SpotFleetLaunchSpecification{
 					{
 						WeightedCapacity: aws.Float64(1),
 					},
@@ -303,33 +341,33 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 						WeightedCapacity: aws.Float64(2),
 					},
 				},
-				TargetCapacity: aws.Int64(1),
+				TargetCapacity: aws.Int32(1),
 			},
 		},
 		{
 			name: "with float weighted capacities and a launch template",
-			config: &ec2.SpotFleetRequestConfigData{
-				LaunchTemplateConfigs: []*ec2.LaunchTemplateConfig{
+			config: &ec2types.SpotFleetRequestConfigData{
+				LaunchTemplateConfigs: []ec2types.LaunchTemplateConfig{
 					{
-						Overrides: []*ec2.LaunchTemplateOverrides{
+						Overrides: []ec2types.LaunchTemplateOverrides{
 							{
 								WeightedCapacity: aws.Float64(1.5),
 							},
 						},
 					},
 				},
-				TargetCapacity: aws.Int64(1),
+				TargetCapacity: aws.Int32(1),
 			},
 		},
 		{
 			name: "with float weighted capacities and without a launch template",
-			config: &ec2.SpotFleetRequestConfigData{
-				LaunchSpecifications: []*ec2.SpotFleetLaunchSpecification{
+			config: &ec2types.SpotFleetRequestConfigData{
+				LaunchSpecifications: []ec2types.SpotFleetLaunchSpecification{
 					{
 						WeightedCapacity: aws.Float64(1.5),
 					},
 				},
-				TargetCapacity: aws.Int64(1),
+				TargetCapacity: aws.Int32(1),
 			},
 		},
 	}
@@ -339,13 +377,15 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			spotFleetRequestID := "sfr-39d27795-73f7-4c2d-976f-3262e0c988af"
-			ec2Mock := mocks.NewMockEC2API(ctrl)
-			drainerMock := mocks.NewMockDrainer(ctrl)
-			pollerMock := mocks.NewMockPoller(ctrl)
+			ctx := context.Background()
 
-			ec2Mock.EXPECT().DescribeSpotFleetRequests(gomock.Any()).Return(&ec2.DescribeSpotFleetRequestsOutput{
-				SpotFleetRequestConfigs: []*ec2.SpotFleetRequestConfig{
+			spotFleetRequestID := "sfr-39d27795-73f7-4c2d-976f-3262e0c988af"
+			ec2Mock := capacitymock.NewMockEC2API(ctrl)
+			drainerMock := capacitymock.NewMockDrainer(ctrl)
+			pollerMock := capacitymock.NewMockPoller(ctrl)
+
+			ec2Mock.EXPECT().DescribeSpotFleetRequests(ctx, gomock.Any()).Return(&ec2.DescribeSpotFleetRequestsOutput{
+				SpotFleetRequestConfigs: []ec2types.SpotFleetRequestConfig{
 					{
 						SpotFleetRequestId:     aws.String(spotFleetRequestID),
 						SpotFleetRequestConfig: tt.config,
@@ -358,7 +398,7 @@ func TestSpotFleetRequest_ReduceCapacity(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := sfr.ReduceCapacity(4, drainerMock, pollerMock); err == nil {
+			if err := sfr.ReduceCapacity(ctx, 4, drainerMock, pollerMock); err == nil {
 				t.Errorf("err = nil; want non-nil")
 			}
 		})

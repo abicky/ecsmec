@@ -2,33 +2,33 @@ package capacity_test
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/autoscaling"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	autoscalingtypes "github.com/aws/aws-sdk-go-v2/service/autoscaling/types"
 )
 
 func TestMain(m *testing.M) {
-	log.SetOutput(ioutil.Discard)
+	log.SetOutput(io.Discard)
 	os.Exit(m.Run())
 }
 
-func createInstance(az string) *autoscaling.Instance {
+func createInstance(az string) autoscalingtypes.Instance {
 	return createInstances(az, 1)[0]
 }
 
-func createInstances(az string, size int) []*autoscaling.Instance {
+func createInstances(az string, size int) []autoscalingtypes.Instance {
 	azChar := az[len(az)-1:]
-	instances := make([]*autoscaling.Instance, size)
-	for i := 0; i < size; i++ {
-		instances[i] = &autoscaling.Instance{
+	instances := make([]autoscalingtypes.Instance, size)
+	for i := range size {
+		instances[i] = autoscalingtypes.Instance{
 			AvailabilityZone: aws.String(az),
-			InstanceId:       aws.String(fmt.Sprintf("i-%s%08x%08d", azChar, rand.Int31(), i)),
-			LifecycleState:   aws.String("InService"),
+			InstanceId:       aws.String(fmt.Sprintf("i-%s%08x%08d", azChar, rand.Uint32(), i)),
+			LifecycleState:   "InService",
 		}
 	}
 

@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 
 	"github.com/abicky/ecsmec/internal/service"
 )
@@ -13,59 +13,68 @@ import (
 func TestNewDefinitionFromExistingService(t *testing.T) {
 	tests := []struct {
 		name string
-		s    *ecs.Service
+		s    ecstypes.Service
 		want *service.Definition
 	}{
 		{
 			name: "default",
-			s: &ecs.Service{
+			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: aws.String("NONE"),
+				Deployments:   make([]ecstypes.Deployment, 1),
+				DesiredCount:  1,
+				PropagateTags: ecstypes.PropagateTagsNone,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"),
 			},
 			want: &service.Definition{
-				Cluster:       aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: nil,
-				Role:          nil,
+				Cluster:      aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
+				DesiredCount: aws.Int32(1),
+				Role:         nil,
 			},
 		},
 		{
 			name: "when the service linked role has a suffix",
-			s: &ecs.Service{
+			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: aws.String("NONE"),
+				Deployments:   make([]ecstypes.Deployment, 1),
+				DesiredCount:  1,
+				PropagateTags: ecstypes.PropagateTagsNone,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS2"),
 			},
 			want: &service.Definition{
-				Cluster:       aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: nil,
-				Role:          nil,
+				Cluster:      aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
+				DesiredCount: aws.Int32(1),
+				Role:         nil,
 			},
 		},
 		{
 			name: "when PropagateTags is specified",
-			s: &ecs.Service{
+			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: aws.String("TASK_DEFINITION"),
+				Deployments:   make([]ecstypes.Deployment, 1),
+				DesiredCount:  1,
+				PropagateTags: ecstypes.PropagateTagsTaskDefinition,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS"),
 			},
 			want: &service.Definition{
 				Cluster:       aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: aws.String("TASK_DEFINITION"),
+				DesiredCount:  aws.Int32(1),
+				PropagateTags: ecstypes.PropagateTagsTaskDefinition,
 				Role:          nil,
 			},
 		},
 		{
 			name: "when Role is specified",
-			s: &ecs.Service{
+			s: ecstypes.Service{
 				ClusterArn:    aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: aws.String("NONE"),
+				Deployments:   make([]ecstypes.Deployment, 1),
+				DesiredCount:  1,
+				PropagateTags: ecstypes.PropagateTagsNone,
 				RoleArn:       aws.String("arn:aws:iam::123456789:role/CustomRole"),
 			},
 			want: &service.Definition{
-				Cluster:       aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
-				PropagateTags: nil,
-				Role:          aws.String("arn:aws:iam::123456789:role/CustomRole"),
+				Cluster:      aws.String("arn:aws:ecs:ap-northeast-1:123456789:cluster/default"),
+				DesiredCount: aws.Int32(1),
+				Role:         aws.String("arn:aws:iam::123456789:role/CustomRole"),
 			},
 		},
 	}
@@ -75,5 +84,43 @@ func TestNewDefinitionFromExistingService(t *testing.T) {
 				t.Errorf("NewDefinitionFromExistingService() = %v; want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDefinition_GoString(t *testing.T) {
+	def := &service.Definition{
+		DeploymentConfiguration: &ecstypes.DeploymentConfiguration{
+			MaximumPercent:        aws.Int32(200),
+			MinimumHealthyPercent: aws.Int32(50),
+		},
+		LoadBalancers: make([]ecstypes.LoadBalancer, 0),
+		PlacementStrategy: []ecstypes.PlacementStrategy{
+			{
+				Field: aws.String("memory"),
+				Type:  ecstypes.PlacementStrategyTypeBinpack,
+			},
+		},
+	}
+
+	want := `{
+  DeploymentConfiguration: {
+    MaximumPercent: 200,
+    MinimumHealthyPercent: 50,
+  },
+  EnableECSManagedTags: false,
+  EnableExecuteCommand: false,
+  LaunchType: "",
+  LoadBalancers: [],
+  PlacementStrategy: [
+    {
+      Field: "memory",
+      Type: "binpack",
+    },
+  ],
+  PropagateTags: "",
+  SchedulingStrategy: "",
+}`
+	if got := def.GoString(); got != want {
+		t.Errorf("GoString() = %v; want %v", got, want)
 	}
 }

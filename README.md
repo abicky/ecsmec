@@ -12,36 +12,36 @@ This tool enables you to do such operations easily.
 
 Download the binary archive from the [releases page](https://github.com/abicky/ecsmec/releases), unpack it, and move the executable "ecsmec" to a directory in your path (e.g. `/usr/local/bin`).
 
-For example, you can install the latest binary on macOS by the following commands:
+For example, you can install the latest binary on a Mac with Apple silicon by the following commands:
 
-```
-curl -LO https://github.com/abicky/ecsmec/releases/latest/download/ecsmec_darwin_amd64.tar.gz
-tar xvf ecsmec_darwin_amd64.tar.gz
-mv ecsmec_darwin_amd64/ecsmec /usr/local/bin/
+```sh
+curl -LO https://github.com/abicky/ecsmec/releases/latest/download/ecsmec_darwin_arm64.tar.gz
+tar xvf ecsmec_darwin_arm64.tar.gz
+mv ecsmec_darwin_arm64/ecsmec /usr/local/bin/
 ```
 
 If you download the archive via a browser on macOS Catalina or later, you may receive the message "“ecsmec” cannot be opened because the developer cannot be verified."
 In such a case, you need to delete the attribute "com.apple.quarantine" like below:
 
-```
+```sh
 xattr -d com.apple.quarantine /path/to/ecsmec
 ```
 
 ### Install with Homebrew (macOS or Linux)
 
-```
+```sh
 brew install abicky/tools/ecsmec
 ```
 
 ### Install from source
 
-```
+```sh
 go get -u github.com:abicky/ecsmec
 ```
 
 or
 
-```
+```sh
 git clone https://github.com:abicky/ecsmec
 cd ecsmec
 make install
@@ -52,7 +52,7 @@ make install
 
 ### recreate-service
 
-```
+```console
 $ ecsmec recreate-service --help
 This command creates a new service from the specified service with overrides,
 and after the new service becomes stable, it deletes the old one.
@@ -94,7 +94,6 @@ Global Flags:
 ```
 
 The option "overrides" is in the same format as the [CreateService API](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_CreateService.html) parameter, except that the first letter of each field is uppercase.
-Although the [UpdateService API](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_UpdateService.html) supports updating the task placement strategies and constraints, the feature is still in preview and the command helps you to update the task placement strategies and constraints safely.
 
 This command does the following operations to recreate the specified service:
 
@@ -111,7 +110,7 @@ If the service name is overridden, the operations change as follow:
 
 You need the following permissions to execute the command:
 
-```
+```json
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -141,6 +140,15 @@ You need the following permissions to execute the command:
       ],
       "Resource": [
         "arn:aws:ecs:<region>:<account-id>:service/<cluster>/*"
+      ],
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:PassRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::<account-id>:role/<role_for_volume_configurations>"
       ]
     }
   ]
@@ -149,7 +157,7 @@ You need the following permissions to execute the command:
 
 ### reduce-cluster-capacity
 
-```
+```console
 $ ecsmec reduce-cluster-capacity --help
 This command reduces the capacity of the specified cluster safely
 that belong to the auto scaling group or spot fleet request.
@@ -188,7 +196,7 @@ You need the following permissions to execute the command:
 
 For a auto scaling group:
 
-```
+```json
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -253,7 +261,7 @@ For a auto scaling group:
 
 For a spot fleet request:
 
-```
+```json
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -328,7 +336,7 @@ For a spot fleet request:
 
 ### replace-auto-scaling-group-instances
 
-```
+```console
 $ ecsmec replace-auto-scaling-group-instances --help
 This command replaces container instances that belong to the specified
 auto scaling group and are launched before the time when this command
@@ -360,7 +368,7 @@ This command does the following operations to replace container instances:
 
 You need the following permissions to execute the command:
 
-```
+```json
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -426,12 +434,12 @@ You need the following permissions to execute the command:
 }
 ```
 
-### terminate-spot-fleet-request-instances
+### terminate-spot-fleet-instances
 
-```
+```console
 $ ecsmec terminate-spot-fleet-instances --help
 This command terminates all the container instances safely that belong
-to the specified spot fleet request.
+to the specified spot fleet request with state "cancelled".
 
 Usage:
   ecsmec terminate-spot-fleet-instances [flags]
@@ -455,7 +463,7 @@ This command does the following operations to terminate container instances:
 
 You need the following permissions to execute the command:
 
-```
+```json
 {
   "Version": "2012-10-17",
   "Statement": [

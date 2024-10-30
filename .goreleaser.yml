@@ -1,8 +1,9 @@
+version: 2
+
 before:
   hooks:
-    - go mod download
-    - env GO111MODULE=off GOBIN=/tmp/bin go get github.com/Songmu/gocredits/cmd/gocredits
-    - /tmp/bin/gocredits -w .
+    - go install github.com/Songmu/gocredits/cmd/gocredits@latest
+    - gocredits -w .
 builds:
   - env:
       - CGO_ENABLED=0
@@ -10,11 +11,13 @@ builds:
       - darwin
       - linux
       - windows
+    flags:
+      - -trimpath
     ldflags:
       - -s -w -X github.com/abicky/ecsmec/cmd.revision={{.ShortCommit}}
 archives:
-  - # Exclude the version to download the latest version via https://github.com/abicky/ecsmec/releases/latest/download/$archive_name
-    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+  - # Exclude the version from the default name_template to download the latest version via https://github.com/abicky/ecsmec/releases/latest/download/$archive_name
+    name_template: '{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ with .Mips }}_{{ . }}{{ end }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}'
     files:
       - LICENSE
       - README.md
@@ -24,18 +27,18 @@ archives:
         format: zip
     wrap_in_directory: true
 brews:
-  - tap:
+  - repository:
       owner: abicky
       name: homebrew-tools
     homepage: "https://github.com/abicky/ecsmec"
     description: "A CLI tool for Amazon ECS that provides some commands to execute bothersome operations"
-    folder: Formula
+    directory: Formula
     test: |
       system "#{bin}/ecsmec --version"
 checksum:
   name_template: 'checksums.txt'
 snapshot:
-  name_template: "{{ .Tag }}-next"
+  version_template: "{{ .Tag }}-next"
 changelog:
   sort: asc
   filters:
