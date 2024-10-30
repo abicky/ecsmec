@@ -11,6 +11,8 @@ builds:
       - darwin
       - linux
       - windows
+    flags:
+      - -trimpath
     ldflags:
       - -s -w -X github.com/abicky/ecsmec/cmd.revision={{.ShortCommit}}
 archives:
