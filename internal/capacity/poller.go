@@ -2,6 +2,7 @@ package capacity
 
 import (
 	"context"
+	"errors"
 	"log"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -49,6 +50,9 @@ func (p *SQSQueuePoller) PollOnce(ctx context.Context, callback func([]sqstypes.
 		VisibilityTimeout:   10,
 		WaitTimeSeconds:     waitTimeSeconds,
 	})
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
 	if err != nil {
 		return xerrors.Errorf("failed to receive messages: %w", err)
 	}
@@ -66,6 +70,9 @@ func (p *SQSQueuePoller) PollOnce(ctx context.Context, callback func([]sqstypes.
 		Entries:  entries,
 		QueueUrl: aws.String(p.queueURL),
 	})
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
 	if err != nil {
 		return xerrors.Errorf("failed to delete messages: %w", err)
 	}

@@ -94,7 +94,6 @@ Global Flags:
 ```
 
 The option "overrides" is in the same format as the [CreateService API](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_CreateService.html) parameter, except that the first letter of each field is uppercase.
-Although the [UpdateService API](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_UpdateService.html) supports updating the task placement strategies and constraints, the feature is still in preview and the command helps you to update the task placement strategies and constraints safely.
 
 This command does the following operations to recreate the specified service:
 
@@ -435,12 +434,12 @@ You need the following permissions to execute the command:
 }
 ```
 
-### terminate-spot-fleet-request-instances
+### terminate-spot-fleet-instances
 
 ```
 $ ecsmec terminate-spot-fleet-instances --help
 This command terminates all the container instances safely that belong
-to the specified spot fleet request.
+to the specified spot fleet request with state "cancelled".
 
 Usage:
   ecsmec terminate-spot-fleet-instances [flags]

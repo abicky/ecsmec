@@ -75,7 +75,8 @@ func (s *Service) copy(ctx context.Context, cluster string, serviceName string, 
 	}
 
 	config := def.buildCreateServiceInput()
-	log.Printf("Create the following service and wait for it to become stable\n%#v\n", config)
+	log.Printf("Create the following service and wait for it to become stable\n%#v\n", def)
+
 	err = retryOnServiceCreationTempErr(func() error {
 		return s.createAndWaitUntilStable(ctx, config)
 	}, 60)

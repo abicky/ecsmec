@@ -42,7 +42,7 @@ func (sfr *SpotFleetRequest) TerminateAllInstances(ctx context.Context, drainer 
 	}
 
 	if sfr.SpotFleetRequestConfigData.Type == ec2types.FleetTypeMaintain && !strings.HasPrefix(string(sfr.SpotFleetRequestState), "cancelled") {
-		return xerrors.Errorf("the spot fleet request with the type \"%s\" must be canceled, but the state is \"%s\"", ec2types.FleetTypeMaintain, sfr.SpotFleetRequestState)
+		return xerrors.Errorf("the spot fleet request with the type \"%s\" must be cancelled, but the state is \"%s\"", ec2types.FleetTypeMaintain, sfr.SpotFleetRequestState)
 	}
 
 	if err := drainer.Drain(ctx, instanceIDs); err != nil {

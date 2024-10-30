@@ -83,7 +83,7 @@ func (asg *AutoScalingGroup) reload(ctx context.Context) error {
 		return xerrors.Errorf("failed to describe the auto scaling group: %w", err)
 	}
 
-	if resp.AutoScalingGroups == nil {
+	if len(resp.AutoScalingGroups) == 0 {
 		return xerrors.Errorf("the auto scaling group \"%s\" doesn't exist", asg.name)
 	}
 
@@ -307,9 +307,8 @@ func (asg *AutoScalingGroup) createTag(key string, value string) autoscalingtype
 }
 
 func (asg *AutoScalingGroup) waitUntilInstancesInService(ctx context.Context, capacity int32) error {
-	// WaitUntilGroupInService doesn't work even if the MinSize is equal to the DesiredCapacity
-	// (https://github.com/aws/aws-sdk-go/issues/2478),
-	// so wait manually
+	// NOTE: autoscaling.GroupInServiceWaiter waits until there are MinSize instances with lifecycle state "InService",
+	// that is, without increasing MinSize, Wait() might exists immediately.
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 

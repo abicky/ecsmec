@@ -86,3 +86,41 @@ func TestNewDefinitionFromExistingService(t *testing.T) {
 		})
 	}
 }
+
+func TestDefinition_GoString(t *testing.T) {
+	def := &service.Definition{
+		DeploymentConfiguration: &ecstypes.DeploymentConfiguration{
+			MaximumPercent:        aws.Int32(200),
+			MinimumHealthyPercent: aws.Int32(50),
+		},
+		LoadBalancers: make([]ecstypes.LoadBalancer, 0),
+		PlacementStrategy: []ecstypes.PlacementStrategy{
+			{
+				Field: aws.String("memory"),
+				Type:  ecstypes.PlacementStrategyTypeBinpack,
+			},
+		},
+	}
+
+	want := `{
+  DeploymentConfiguration: {
+    MaximumPercent: 200,
+    MinimumHealthyPercent: 50,
+  },
+  EnableECSManagedTags: false,
+  EnableExecuteCommand: false,
+  LaunchType: "",
+  LoadBalancers: [],
+  PlacementStrategy: [
+    {
+      Field: "memory",
+      Type: "binpack",
+    },
+  ],
+  PropagateTags: "",
+  SchedulingStrategy: "",
+}`
+	if got := def.GoString(); got != want {
+		t.Errorf("GoString() = %v; want %v", got, want)
+	}
+}

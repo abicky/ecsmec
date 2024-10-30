@@ -1,6 +1,8 @@
 package service
 
 import (
+	"fmt"
+	"reflect"
 	"strings"
 
 	"dario.cat/mergo"
@@ -53,10 +55,65 @@ func NewDefinitionFromExistingService(s ecstypes.Service) *Definition {
 	}
 }
 
+func (d *Definition) GoString() string {
+	var sb strings.Builder
+	d.prettify(&sb, reflect.ValueOf(d), 0)
+	return sb.String()
+}
+
 func (d *Definition) merge(other *Definition) error {
 	return mergo.Merge(d, *other, mergo.WithOverride)
 }
 
 func (d *Definition) buildCreateServiceInput() *ecs.CreateServiceInput {
 	return (*ecs.CreateServiceInput)(d)
+}
+
+func (d *Definition) prettify(sb *strings.Builder, v reflect.Value, indent int) {
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	switch v.Kind() {
+	case reflect.Struct:
+		sb.WriteString("{\n")
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).PkgPath != "" {
+				continue
+			}
+
+			f := v.Field(i)
+			if (f.Kind() == reflect.Ptr || f.Kind() == reflect.Slice) && f.IsNil() {
+				continue
+			}
+
+			sb.WriteString(strings.Repeat("  ", indent+1))
+			sb.WriteString(v.Type().Field(i).Name)
+			sb.WriteString(": ")
+			d.prettify(sb, v.Field(i), indent+1)
+			sb.WriteString(",\n")
+		}
+		sb.WriteString(strings.Repeat("  ", indent))
+		sb.WriteString("}")
+	case reflect.Slice:
+		if v.Len() == 0 {
+			sb.WriteString("[]")
+			return
+		}
+
+		sb.WriteString("[\n")
+		for i := 0; i < v.Len(); i++ {
+			sb.WriteString(strings.Repeat("  ", indent+1))
+			d.prettify(sb, v.Index(i), indent+1)
+			sb.WriteString(",\n")
+		}
+		sb.WriteString(strings.Repeat("  ", indent))
+		sb.WriteString("]")
+	default:
+		if v.Kind() == reflect.String {
+			fmt.Fprintf(sb, "%q", v.String())
+		} else {
+			fmt.Fprint(sb, v.Interface())
+		}
+	}
 }

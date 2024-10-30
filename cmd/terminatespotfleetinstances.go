@@ -16,7 +16,7 @@ func init() {
 		Use:   "terminate-spot-fleet-instances",
 		Short: "Terminate spot fleet instances",
 		Long: `This command terminates all the container instances safely that belong
-to the specified spot fleet request.`,
+to the specified spot fleet request with state "cancelled".`,
 		RunE: terminateSpotFleetInstances,
 	}
 	rootCmd.AddCommand(cmd)

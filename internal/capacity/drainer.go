@@ -155,7 +155,10 @@ func (d *drainer) drainContainerInstances(ctx context.Context, arns []*string, w
 				// because other tasks can't have such a task group name due to the error "Invalid namespace for group".
 				if strings.HasPrefix(*t.Group, "service:") {
 					// Remove "service:" prefix
-					allServiceNames = append(allServiceNames, (*t.Group)[8:])
+					serviceName := (*t.Group)[8:]
+					if !slices.Contains(allServiceNames, serviceName) {
+						allServiceNames = append(allServiceNames, serviceName)
+					}
 				} else {
 					// Stop tasks manually because tasks that don't belong to a service won't stop
 					// even after their cluster instance's status becomes "DRAINING"
