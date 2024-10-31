@@ -39,7 +39,7 @@ func NewAutoScalingGroup(name string, asSvc AutoScalingAPI, ec2Svc EC2API) (*Aut
 	return &asg, nil
 }
 
-func (asg *AutoScalingGroup) ReplaceInstances(ctx context.Context, drainer Drainer) error {
+func (asg *AutoScalingGroup) ReplaceInstances(ctx context.Context, drainer Drainer, cluster Cluster) error {
 	oldInstanceIDs := make([]string, 0)
 	baseTime := asg.StateSavedAt
 	if baseTime == nil {
@@ -60,7 +60,13 @@ func (asg *AutoScalingGroup) ReplaceInstances(ctx context.Context, drainer Drain
 		return xerrors.Errorf("failed to launch new instances: %w", err)
 	}
 
-	if err := asg.terminateInstances(ctx, *asg.DesiredCapacity-*asg.OriginalDesiredCapacity, drainer); err != nil {
+	newInstanceCount := *asg.DesiredCapacity - *asg.OriginalDesiredCapacity
+	log.Printf("Wait for all the new instances to be registered in the cluster %q\n", cluster.Name())
+	if err := cluster.WaitUntilContainerInstancesRegistered(ctx, int(newInstanceCount), asg.StateSavedAt); err != nil {
+		return xerrors.Errorf("failed to wait until container instances are registered: %w", err)
+	}
+
+	if err := asg.terminateInstances(ctx, newInstanceCount, drainer); err != nil {
 		return xerrors.Errorf("failed to terminate instances: %w", err)
 	}
 
@@ -339,6 +345,8 @@ func (asg *AutoScalingGroup) waitUntilInstancesInService(ctx context.Context, ca
 			continue
 		case <-timer.C:
 			return xerrors.Errorf("can't prepare at least %d in-service instances within %v", capacity, timeout)
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }
