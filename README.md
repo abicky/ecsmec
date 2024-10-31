@@ -1,6 +1,6 @@
 # ecsmec
 
-![](https://github.com/abicky/ecsmec/workflows/main/badge.svg?branch=master)
+[![main](https://github.com/abicky/ecsmec/actions/workflows/main.yml/badge.svg)](https://github.com/abicky/ecsmec/actions/workflows/main.yml)
 
 `ecsmec` is a CLI tool for Amazon ECS that provides some commands to execute bothersome operations.
 For example, if you manage your ECS clusters with a auto scaling group and want to replace all the container instances with new ones, you have to launch new instances, drain old instances, and so on. What a pain!
