@@ -2,6 +2,7 @@ version: 2
 
 before:
   hooks:
+    - go mod tidy # Download all the packages listed in go.sum
     - go install github.com/Songmu/gocredits/cmd/gocredits@latest
     - gocredits -w .
 builds:
