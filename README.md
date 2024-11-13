@@ -47,6 +47,13 @@ cd ecsmec
 make install
 ```
 
+### Enable completions
+
+The `completion` subcommand generates an autocompletion script. For example, you can generate the autocompletion script for zsh as follows:
+
+```sh
+ecsmec completion zsh >/usr/local/share/zsh/site-functions/_ecsmec
+```
 
 ## Usage
 

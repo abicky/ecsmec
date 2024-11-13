@@ -34,6 +34,9 @@ brews:
     homepage: "https://github.com/abicky/ecsmec"
     description: "A CLI tool for Amazon ECS that provides some commands to execute bothersome operations"
     directory: Formula
+    install: |
+      bin.install "ecsmec"
+      generate_completions_from_executable(bin/"ecsmec", "completion")
     test: |
       system "#{bin}/ecsmec --version"
 checksum:
